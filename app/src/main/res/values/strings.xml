@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Jarvis</string>
+    <string name="accessibility_service_description">Enable Jarvis to automatically perform actions and navigate apps on your behalf.</string>
+    <string name="agent_service_name">Jarvis Agent Service</string>
+</resources>
