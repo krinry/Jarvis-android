@@ -11,6 +11,29 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystoreProperties = java.util.Properties()
+            val keystorePropertiesFile = rootProject.file("local.properties")
+            if (keystorePropertiesFile.exists()) {
+                keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+            }
+            storeFile = file(keystoreProperties.getProperty("KEYSTORE_FILE", System.getenv("KEYSTORE_FILE") ?: "keystore.jks"))
+            storePassword = keystoreProperties.getProperty("KEYSTORE_PASSWORD", System.getenv("KEYSTORE_PASSWORD") ?: "")
+            keyAlias = keystoreProperties.getProperty("KEY_ALIAS", System.getenv("KEY_ALIAS") ?: "")
+            keyPassword = keystoreProperties.getProperty("KEY_PASSWORD", System.getenv("KEY_PASSWORD") ?: "")
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.krinry.jarvis"
         minSdk = 24
@@ -28,6 +51,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
