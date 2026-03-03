@@ -16,3 +16,4 @@ local.properties
 /transfer
 *.jks
 keystore.properties
+/docs

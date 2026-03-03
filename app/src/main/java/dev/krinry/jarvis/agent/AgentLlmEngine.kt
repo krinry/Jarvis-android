@@ -31,33 +31,31 @@ class AgentLlmEngine(private val context: Context) {
         private const val MAX_ITERATIONS = 30
         private const val SCREEN_SETTLE_DELAY = 600L
 
-        private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Full device control via AccessibilityService. Respond ONLY in valid JSON, no markdown.
+        private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Full device control via AccessibilityService. Respond ONLY valid JSON.
 
-FIRST CALL: Include "plan" field = short step list. Example: {"plan":["open PlayStore","search game","click Install","click OK on dialog","wait download","verify installed"],"action":"open_app","app_name":"Google Play Store","speech":"PlayStore khol raha hoon","reason":"opening store","status":"in_progress"}
+FIRST CALL: Include "plan" = step list. Example: {"plan":["find Mom's number","call Mom"],"action":"find_contact","text":"Mom","speech":"Mom ka number dhoondh raha hoon","reason":"finding contact","status":"in_progress"}
 
-NEXT CALLS: You get compact memory (Task/Plan/Done/Step/Last) + current UI. Continue executing plan.
+ACTIONS ({"action":"X","speech":"","reason":"","status":"in_progress|done"} + fields):
+UI: click:+node_id | type:+node_id,text | tap_xy:+x,y | long_press:+x,y | scroll_down/up | swipe:+text | back/home/recent | open_app:+app_name | open_url:+url | screenshot | copy | paste:+node_id | select_all | open_notifications
+DIRECT: call:+phone | send_sms:+phone,text | set_alarm:+text | set_timer:+text | create_event:+text | navigate:+text | search_web:+text | send_email:+text,body | flashlight:+text(on/off) | set_volume:+text | open_settings:+text
+CONTACTS: find_contact:+text(name, returns phone numbers)
+NOTIFICATIONS: read_notifications | dismiss_notification:+text(app name)
+FILES: list_files:+path | read_file:+path | write_file:+path,body | delete_file:+path | share_file:+path
+TERMUX: termux_run:+command | termux_write_file:+path,body | termux_read_file:+path
+WEB: http_get:+url | http_post:+url,body
+CONTROL: wait:+wait_seconds(5-60, real pause) | done:status="done"
 
-ACTIONS (JSON: {"action":"X","speech":"","reason":"","status":"in_progress|done"} + fields):
-- open_app: +app_name | click: +node_id | type: +node_id,text | tap_xy: +x,y | long_press: +x,y
-- scroll_down/scroll_up | swipe: +text(left|right|up|down) | back/home/recent
-- open_url: +url | screenshot | copy | paste: +node_id | select_all | open_notifications
-- wait: +wait_seconds(5-60, real delay, NO API CALL during wait) | done: status="done"
+UI FORMAT: i=id,t=text,d=desc,T=type,c=clickable,e=editable,s=scrollable. DIFF: +=new,-=removed,~=changed.
 
-UI: i=id,t=text,d=desc,T=type(B=Button,E=EditText,IB=ImageButton,TV=TextView,IV=ImageView),c=clickable,e=editable,s=scrollable. x,y=coords(only some nodes). DIFF: +=new,-=removed,~=changed. UI_SAME=no change.
-
-CRITICAL RULES:
-1. DIALOGS FIRST: ANY popup/dialog/bottom-sheet (OK/Cancel/Accept/Allow/Confirm/Continue) → CLICK it before anything else. NEVER ignore. Examples: network choice dialog → click OK. Permission dialog → click Allow.
-2. VERIFY BY UI TEXT, NOT SCREENSHOT: To confirm install/download/send:
-   - PlayStore: "Install" button MUST change to "Open" or "Uninstall" in UI. If still "Install" → NOT done.
-   - WhatsApp: message must appear in chat. If not visible → NOT done.
-   - NEVER say done based on screenshot alone. ALWAYS check actual UI text/buttons.
-3. SMART WAIT: For long operations use {"action":"wait","wait_seconds":30}. Real pause, 0 tokens. After wait, re-check UI.
-4. NEVER DONE EARLY: Full sequence required:
-   - Install: click Install → click OK on dialog → wait 30-60s → check UI shows "Open" not "Install" → done
-   - Message: type text → click Send → check message visible in chat → done
-5. Speech: Hindi. First=confirm task, middle="", done=result, error=explain
-6. Apps: ALWAYS open_app first. Exact names: "WhatsApp","YouTube","Chrome","Google Play Store"
-7. Node missing? scroll_down first → if still missing, try tap_xy → give up after 3 tries"""
+RULES:
+1. DIALOGS: Any popup/dialog (OK/Cancel/Allow) → click it FIRST. Never ignore.
+2. VERIFY: Install done only when UI shows "Open" not "Install". Message done only when visible in chat. NEVER trust screenshot.
+3. SMART WAIT: Downloads/installs → wait 30-60s. 0 tokens during wait.
+4. NEVER DONE EARLY: Install→click OK→wait→verify. Message→type→send→verify.
+5. For calls: find_contact first if name given, then call with phone number.
+6. Speech: Hindi. first=confirm, middle="", done=result.
+7. Direct actions (call/sms/alarm/timer/navigate) skip UI — much faster.
+8. Termux: write code with termux_write_file, run with termux_run."""
     }
 
     var onStatusUpdate: ((String) -> Unit)? = null
@@ -202,8 +200,12 @@ CRITICAL RULES:
                 continue // Go back to top, re-read screen, THEN call API
             }
 
-            // 11. Execute action
-            val result = ActionExecutor.execute(action, uiNodes)
+            // 11. Execute action (WebApi is suspend, others are not)
+            val result = if (action.action in listOf("http_get", "http_post")) {
+                WebApiExecutor.execute(action)
+            } else {
+                ActionExecutor.execute(action, uiNodes)
+            }
             Log.d(TAG, "Result: $result")
             onStatusUpdate?.invoke(result)
 
@@ -271,23 +273,48 @@ CRITICAL RULES:
         return when (action) {
             "click" -> "Click kar raha hoon"
             "type" -> "Type kar raha hoon"
-            "scroll_down" -> "Neeche scroll kar raha hoon"
-            "scroll_up" -> "Upar scroll kar raha hoon"
-            "back" -> "Back ja raha hoon"
-            "home" -> "Home ja raha hoon"
-            "recent" -> "Recent apps dekh raha hoon"
+            "scroll_down" -> "Neeche scroll"
+            "scroll_up" -> "Upar scroll"
+            "back" -> "Back"
+            "home" -> "Home"
+            "recent" -> "Recent apps"
             "open_app" -> "App khol raha hoon"
             "open_url" -> "URL khol raha hoon"
-            "tap_xy" -> "Tap kar raha hoon"
-            "long_press" -> "Long press kar raha hoon"
-            "swipe" -> "Swipe kar raha hoon"
-            "screenshot" -> "Screenshot le raha hoon"
-            "copy" -> "Copy kar raha hoon"
-            "paste" -> "Paste kar raha hoon"
-            "select_all" -> "Sab select kar raha hoon"
-            "open_notifications" -> "Notifications dekh raha hoon"
-            "wait" -> "Wait kar raha hoon"
+            "tap_xy" -> "Tap"
+            "long_press" -> "Long press"
+            "swipe" -> "Swipe"
+            "screenshot" -> "Screenshot"
+            "copy" -> "Copy"
+            "paste" -> "Paste"
+            "select_all" -> "Select all"
+            "open_notifications" -> "Notifications"
+            "wait" -> "Wait"
             "done" -> "Ho gaya"
+            // Phase 1 actions
+            "call" -> "📞 Call kar raha hoon"
+            "send_sms" -> "💬 SMS bhej raha hoon"
+            "set_alarm" -> "⏰ Alarm set"
+            "set_timer" -> "⏱ Timer set"
+            "create_event" -> "📅 Calendar event"
+            "navigate" -> "🗺 Navigation"
+            "search_web" -> "🔍 Web search"
+            "send_email" -> "✉ Email"
+            "flashlight" -> "🔦 Flashlight"
+            "set_volume" -> "🔊 Volume"
+            "open_settings" -> "⚙ Settings"
+            "find_contact" -> "👤 Contact dhoondh raha hoon"
+            "read_notifications" -> "🔔 Notifications padh raha hoon"
+            "dismiss_notification" -> "🔕 Notification dismiss"
+            "list_files" -> "📁 Files dekh raha hoon"
+            "read_file" -> "📄 File padh raha hoon"
+            "write_file" -> "✏ File likh raha hoon"
+            "delete_file" -> "🗑 File delete"
+            "share_file" -> "📤 File share"
+            "termux_run" -> "🖥 Termux command"
+            "termux_write_file" -> "✏ Termux file likh raha hoon"
+            "termux_read_file" -> "📄 Termux file padh raha hoon"
+            "http_get" -> "🌐 Web data fetch"
+            "http_post" -> "🌐 Web data send"
             else -> action
         }
     }

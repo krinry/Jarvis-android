@@ -33,7 +33,11 @@ object ActionExecutor {
         val x: Int?,            // For tap_xy
         val y: Int?,            // For tap_xy
         val reason: String?,    // LLM's reasoning
-        val waitSeconds: Int?   // Smart wait: real delay in seconds (3-60)
+        val waitSeconds: Int?,  // Smart wait: real delay in seconds (3-60)
+        val phone: String?,     // For call/sms
+        val body: String?,      // For file content, HTTP body, email body
+        val path: String?,      // For file paths, termux file paths
+        val command: String?    // For termux commands
     )
 
     fun parseResponse(json: String): AgentAction? {
@@ -56,7 +60,11 @@ object ActionExecutor {
                 x = if (obj.has("x")) obj.optInt("x") else null,
                 y = if (obj.has("y")) obj.optInt("y") else null,
                 reason = obj.optString("reason", "").takeIf { it.isNotEmpty() },
-                waitSeconds = if (obj.has("wait_seconds")) obj.optInt("wait_seconds", 10) else null
+                waitSeconds = if (obj.has("wait_seconds")) obj.optInt("wait_seconds", 10) else null,
+                phone = obj.optString("phone", "").takeIf { it.isNotEmpty() },
+                body = obj.optString("body", "").takeIf { it.isNotEmpty() },
+                path = obj.optString("path", "").takeIf { it.isNotEmpty() },
+                command = obj.optString("command", "").takeIf { it.isNotEmpty() }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Parse failed: ${json.take(200)}", e)
@@ -127,6 +135,24 @@ object ActionExecutor {
             "open_notifications" -> { service.openNotifications(); "✅ Notifications khol diya" }
             "wait" -> "⏳ Screen load ho raha hai..."
             "done" -> "✅ Kaam ho gaya!"
+
+            // === New Phase 1 Actions ===
+            // Termux
+            "termux_run", "termux_write_file", "termux_read_file" ->
+                TermuxBridge.execute(action, service.applicationContext)
+            // Direct Intents (no UI needed)
+            "call", "send_sms", "set_alarm", "set_timer", "create_event",
+            "navigate", "search_web", "send_email", "flashlight", "set_volume", "open_settings" ->
+                DirectIntentExecutor.execute(action, service.applicationContext)
+            // Contacts
+            "find_contact" -> ContactsLookup.execute(action, service.applicationContext)
+            // Notifications
+            "read_notifications", "dismiss_notification" ->
+                NotificationReader.execute(action, service.applicationContext)
+            // File Manager
+            "list_files", "read_file", "write_file", "delete_file", "share_file" ->
+                FileManagerExecutor.execute(action, service.applicationContext)
+
             else -> "❓ Unknown action: ${action.action}"
         }
     }
