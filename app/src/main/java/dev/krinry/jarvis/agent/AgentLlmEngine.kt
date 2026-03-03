@@ -18,7 +18,7 @@ import org.json.JSONObject
  * - TaskMemory: compact summary (~50 tokens) replaces raw history (~2000+ tokens)
  * - ScreenDiffCache: only sends changed UI nodes (~50-70% savings)
  * - Only 3 messages per LLM call: [system, context, current]
- * - Conditional x,y coords in UI tree
+ * - Smart wait: real delay (no API call wasted during loading)
  */
 class AgentLlmEngine(private val context: Context) {
 
@@ -31,10 +31,9 @@ class AgentLlmEngine(private val context: Context) {
         private const val MAX_ITERATIONS = 30
         private const val SCREEN_SETTLE_DELAY = 600L
 
-        // Compressed system prompt (~500 tokens). No raw history needed — TaskMemory provides context.
         private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Full device control via AccessibilityService. Respond ONLY in valid JSON, no markdown.
 
-FIRST CALL: Include "plan" field = short step list. Example: {"plan":["open WhatsApp","find contact","type msg","click send"],"action":"open_app","app_name":"WhatsApp","speech":"WhatsApp khol raha hoon","reason":"opening app","status":"in_progress"}
+FIRST CALL: Include "plan" field = short step list. Example: {"plan":["open PlayStore","search game","click Install","click OK on dialog","wait download","verify installed"],"action":"open_app","app_name":"Google Play Store","speech":"PlayStore khol raha hoon","reason":"opening store","status":"in_progress"}
 
 NEXT CALLS: You get compact memory (Task/Plan/Done/Step/Last) + current UI. Continue executing plan.
 
@@ -42,19 +41,28 @@ ACTIONS (JSON: {"action":"X","speech":"","reason":"","status":"in_progress|done"
 - open_app: +app_name | click: +node_id | type: +node_id,text | tap_xy: +x,y | long_press: +x,y
 - scroll_down/scroll_up | swipe: +text(left|right|up|down) | back/home/recent
 - open_url: +url | screenshot | copy | paste: +node_id | select_all | open_notifications
-- wait | done: status="done"
+- wait: +wait_seconds(5-60, real delay, NO API CALL during wait) | done: status="done"
 
 UI: i=id,t=text,d=desc,T=type(B=Button,E=EditText,IB=ImageButton,TV=TextView,IV=ImageView),c=clickable,e=editable,s=scrollable. x,y=coords(only some nodes). DIFF: +=new,-=removed,~=changed. UI_SAME=no change.
 
-RULES:
-1. Speech: Hindi. First=confirm, middle=empty, done=completion, error=explain
-2. Apps: ALWAYS open_app first. Exact: "WhatsApp","YouTube","Chrome"
-3. NEVER done early. After type→click Send→verify→done
-4. Node missing? scroll→tap_xy→search. Give up after trying all
-5. Verify before done: check screen confirms action worked"""
+CRITICAL RULES:
+1. DIALOGS FIRST: ANY popup/dialog/bottom-sheet (OK/Cancel/Accept/Allow/Confirm/Continue) → CLICK it before anything else. NEVER ignore. Examples: network choice dialog → click OK. Permission dialog → click Allow.
+2. VERIFY BY UI TEXT, NOT SCREENSHOT: To confirm install/download/send:
+   - PlayStore: "Install" button MUST change to "Open" or "Uninstall" in UI. If still "Install" → NOT done.
+   - WhatsApp: message must appear in chat. If not visible → NOT done.
+   - NEVER say done based on screenshot alone. ALWAYS check actual UI text/buttons.
+3. SMART WAIT: For long operations use {"action":"wait","wait_seconds":30}. Real pause, 0 tokens. After wait, re-check UI.
+4. NEVER DONE EARLY: Full sequence required:
+   - Install: click Install → click OK on dialog → wait 30-60s → check UI shows "Open" not "Install" → done
+   - Message: type text → click Send → check message visible in chat → done
+5. Speech: Hindi. First=confirm task, middle="", done=result, error=explain
+6. Apps: ALWAYS open_app first. Exact names: "WhatsApp","YouTube","Chrome","Google Play Store"
+7. Node missing? scroll_down first → if still missing, try tap_xy → give up after 3 tries"""
     }
 
     var onStatusUpdate: ((String) -> Unit)? = null
+    // Callback to show plan progress on overlay
+    var onPlanUpdate: ((planSteps: List<String>, currentIndex: Int, completedIndices: Set<Int>) -> Unit)? = null
     private var currentJob: Job? = null
 
     fun startTask(voiceCommand: String, scope: CoroutineScope) {
@@ -121,9 +129,11 @@ RULES:
                 messages.add(mapOf("role" to "user", "content" to "MEM:$memoryContext\nUI:$uiData"))
             }
 
-            // 4. LLM call
-            onStatusUpdate?.invoke("🤔 Step $iteration" +
-                    if (taskMemory.hasPlan) " (${taskMemory.completedSteps()}/${taskMemory.totalSteps()})" else "")
+            // 4. LLM call — show plan progress
+            val planInfo = if (taskMemory.hasPlan) {
+                " (${taskMemory.completedSteps()}/${taskMemory.totalSteps()})"
+            } else ""
+            onStatusUpdate?.invoke("🤔 Step $iteration$planInfo")
 
             val llmResponse = try {
                 GroqApiClient.agentChatDirect(context, messages)
@@ -151,9 +161,16 @@ RULES:
                 continue
             }
 
-            // 6. Extract plan from first response
+            // 6. Extract plan from first response → show on overlay
             if (iteration == 1) {
                 extractPlanFromResponse(llmResponse)
+                // Show plan on screen overlay
+                if (taskMemory.hasPlan) {
+                    emitPlanUpdate()
+                    // TTS: announce plan
+                    val stepCount = taskMemory.totalSteps()
+                    ttsManager.speak("Plan ready, $stepCount steps hain.")
+                }
             }
 
             // 7. Hindi status update with reason
@@ -168,25 +185,38 @@ RULES:
             // 9. Check if done
             if (action.status == "done" || action.action == "done") {
                 taskMemory.markCurrentStepDone("Task complete")
+                emitPlanUpdate()
                 onStatusUpdate?.invoke("✅ Ho gaya: ${action.reason ?: "Task complete"}")
                 delay(2500)
                 return
             }
 
-            // 10. Execute action
+            // 10. SMART WAIT — real delay, NO API call wasted
+            if (action.action == "wait") {
+                val waitSec = action.waitSeconds?.coerceIn(3, 60) ?: 10
+                onStatusUpdate?.invoke("⏳ Wait kar raha hoon ${waitSec}s: ${action.reason ?: "loading..."}")
+                Log.d(TAG, "Smart wait: ${waitSec}s (no API call)")
+                taskMemory.markCurrentStepDone("Waited ${waitSec}s")
+                emitPlanUpdate()
+                delay(waitSec * 1000L) // REAL delay — no token cost!
+                continue // Go back to top, re-read screen, THEN call API
+            }
+
+            // 11. Execute action
             val result = ActionExecutor.execute(action, uiNodes)
             Log.d(TAG, "Result: $result")
             onStatusUpdate?.invoke(result)
 
-            // 11. Update memory
+            // 12. Update memory + plan display
             if (result.startsWith("❌")) {
                 taskMemory.recordError(result)
                 Log.w(TAG, "Action failed: $result")
             } else {
                 taskMemory.markCurrentStepDone(result.take(50))
             }
+            emitPlanUpdate()
 
-            // 12. Screen settle hone do
+            // 13. Screen settle hone do
             delay(SCREEN_SETTLE_DELAY)
         }
 
@@ -218,7 +248,19 @@ RULES:
             }
         } catch (e: Exception) {
             Log.w(TAG, "Could not extract plan: ${e.message}")
-            // Not critical — agent still works without explicit plan
+        }
+    }
+
+    /**
+     * Emit plan progress to overlay callback.
+     */
+    private fun emitPlanUpdate() {
+        if (taskMemory.hasPlan) {
+            onPlanUpdate?.invoke(
+                taskMemory.getPlanSteps(),
+                taskMemory.currentStepIndex,
+                taskMemory.getCompletedIndices()
+            )
         }
     }
 
@@ -244,7 +286,7 @@ RULES:
             "paste" -> "Paste kar raha hoon"
             "select_all" -> "Sab select kar raha hoon"
             "open_notifications" -> "Notifications dekh raha hoon"
-            "wait" -> "Ruk raha hoon"
+            "wait" -> "Wait kar raha hoon"
             "done" -> "Ho gaya"
             else -> action
         }

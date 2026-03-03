@@ -139,6 +139,16 @@ class TaskMemory {
     }
 
     /**
+     * Get plan steps list (for overlay display).
+     */
+    fun getPlanSteps(): List<String> = planSteps.toList()
+
+    /**
+     * Get completed step indices (for overlay display).
+     */
+    fun getCompletedIndices(): Set<Int> = completedStepIndices.toSet()
+
+    /**
      * Get total plan steps count.
      */
     fun totalSteps(): Int = planSteps.size

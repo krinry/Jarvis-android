@@ -73,6 +73,7 @@ class FloatingBubbleService : Service() {
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
     private var subtitleView: View? = null
+    private var planView: View? = null  // Plan progress overlay at top
     private var agentEngine: AgentLlmEngine? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -107,11 +108,18 @@ class FloatingBubbleService : Service() {
                     stopThinkingAnimation()
                     playCompletionSound()
                     vibratePattern(longArrayOf(0, 80, 60, 80))
+                    // Plan stays visible — user can dismiss manually
                 } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
                     isProcessingCommand = false
                     stopThinkingAnimation()
                     vibrateShort()
                 }
+            }
+        }
+        // Plan progress callback — shows checklist at top of screen
+        agentEngine?.onPlanUpdate = { steps, currentIdx, completedSet ->
+            scope.launch(Dispatchers.Main) {
+                updatePlanOverlay(steps, currentIdx, completedSet)
             }
         }
         isRunning = true
@@ -134,7 +142,8 @@ class FloatingBubbleService : Service() {
         menuManager?.releaseWakeLock()
         bubbleView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         subtitleView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
-        bubbleView = null; subtitleView = null
+        planView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
+        bubbleView = null; subtitleView = null; planView = null
         super.onDestroy()
     }
 
@@ -297,6 +306,77 @@ class FloatingBubbleService : Service() {
 
         windowManager.addView(subtitleContainer, subtitleParams)
         subtitleView = subtitleContainer
+
+        // === Plan progress overlay (TOP of screen) ===
+        val planContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                setColor(0xE6101025.toInt())
+                cornerRadius = dpToPx(14).toFloat()
+                setStroke(dpToPx(1), 0x306C5CE7)
+            }
+            visibility = View.GONE
+            tag = "plan_container"
+        }
+
+        // Plan title row with cancel button
+        val planHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val planTitle = TextView(this).apply {
+            tag = "plan_title"
+            text = "📋 Plan"
+            textSize = 13f
+            setTextColor(0xFF8E7CF3.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        planHeader.addView(planTitle)
+
+        // Cancel button ✕
+        val cancelBtn = TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(0xFFFF6B6B.toInt())
+            setPadding(dpToPx(12), dpToPx(4), dpToPx(4), dpToPx(4))
+            setOnClickListener {
+                agentEngine?.cancelTask()
+                isProcessingCommand = false
+                stopThinkingAnimation()
+                hidePlanOverlay()
+                addSubtitle("⏹ Task cancelled")
+                vibrateShort()
+            }
+        }
+        planHeader.addView(cancelBtn)
+        planContainer.addView(planHeader)
+
+        val planStepsText = TextView(this).apply {
+            tag = "plan_steps"
+            text = ""
+            textSize = 12f
+            setTextColor(0xFFCCCCCC.toInt())
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            lineHeight = dpToPx(20)
+        }
+        planContainer.addView(planStepsText)
+
+        val planParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = dpToPx(40)
+        }
+
+        windowManager.addView(planContainer, planParams)
+        planView = planContainer
     }
 
     // =========================================================================
@@ -352,6 +432,51 @@ class FloatingBubbleService : Service() {
             val fadeOut = AlphaAnimation(1f, 0f).apply { duration = 200 }
             view.startAnimation(fadeOut)
             scope.launch { delay(200); view.visibility = View.GONE }
+        }
+    }
+
+    // =========================================================================
+    // === Plan Overlay (Top of screen — shows ✅/▶/○ checklist) ===
+    // =========================================================================
+
+    private fun updatePlanOverlay(steps: List<String>, currentIdx: Int, completedSet: Set<Int>) {
+        planView?.let { view ->
+            if (view.visibility != View.VISIBLE) {
+                view.visibility = View.VISIBLE
+                val slideDown = TranslateAnimation(0f, 0f, -dpToPx(50).toFloat(), 0f).apply { duration = 250 }
+                val fadeIn = AlphaAnimation(0f, 1f).apply { duration = 250 }
+                val animSet = AnimationSet(true).apply { addAnimation(slideDown); addAnimation(fadeIn) }
+                view.startAnimation(animSet)
+            }
+
+            // Update title with progress
+            val titleTv = view.findViewWithTag<TextView>("plan_title")
+            titleTv?.text = "📋 Plan (${completedSet.size}/${steps.size})"
+
+            // Build step list with icons
+            val sb = StringBuilder()
+            steps.forEachIndexed { i, step ->
+                val icon = when {
+                    i in completedSet -> "✅"
+                    i == currentIdx -> "▶"
+                    else -> "○"
+                }
+                sb.append("$icon ${i + 1}. ${step.take(35)}")
+                if (i < steps.size - 1) sb.append("\n")
+            }
+
+            val stepsTv = view.findViewWithTag<TextView>("plan_steps")
+            stepsTv?.text = sb.toString()
+        }
+    }
+
+    private fun hidePlanOverlay() {
+        planView?.let { view ->
+            if (view.visibility == View.VISIBLE) {
+                val fadeOut = AlphaAnimation(1f, 0f).apply { duration = 300 }
+                view.startAnimation(fadeOut)
+                scope.launch { delay(300); view.visibility = View.GONE }
+            }
         }
     }
 

@@ -30,9 +30,10 @@ object ActionExecutor {
         val url: String?,
         val speech: String?,
         val status: String,
-        val x: Int?,         // For tap_xy
-        val y: Int?,         // For tap_xy
-        val reason: String?  // LLM's reasoning
+        val x: Int?,            // For tap_xy
+        val y: Int?,            // For tap_xy
+        val reason: String?,    // LLM's reasoning
+        val waitSeconds: Int?   // Smart wait: real delay in seconds (3-60)
     )
 
     fun parseResponse(json: String): AgentAction? {
@@ -54,7 +55,8 @@ object ActionExecutor {
                 status = obj.optString("status", "in_progress"),
                 x = if (obj.has("x")) obj.optInt("x") else null,
                 y = if (obj.has("y")) obj.optInt("y") else null,
-                reason = obj.optString("reason", "").takeIf { it.isNotEmpty() }
+                reason = obj.optString("reason", "").takeIf { it.isNotEmpty() },
+                waitSeconds = if (obj.has("wait_seconds")) obj.optInt("wait_seconds", 10) else null
             )
         } catch (e: Exception) {
             Log.e(TAG, "Parse failed: ${json.take(200)}", e)
