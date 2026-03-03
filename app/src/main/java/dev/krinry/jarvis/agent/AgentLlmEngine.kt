@@ -28,40 +28,55 @@ class AgentLlmEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "AgentLlmEngine"
-        private const val MAX_ITERATIONS = 30
-        private const val SCREEN_SETTLE_DELAY = 600L
+        private const val MAX_ITERATIONS = 25
+        private const val SCREEN_SETTLE_DELAY = 1500L   // 1.5s between iterations (was 600ms)
+        private const val MIN_API_INTERVAL = 2000L      // Minimum 2s between API calls
+        private const val MAX_CONSECUTIVE_ERRORS = 3    // Stop after 3 parse failures
 
-        private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Full device control via AccessibilityService. Respond ONLY valid JSON.
+        private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Control phone via AccessibilityService.
+Respond ONLY in valid JSON. No markdown, no explanation, no extra text.
 
-FIRST CALL: Include "plan" = step list. Example: {"plan":["find Mom's number","call Mom"],"action":"find_contact","text":"Mom","speech":"Mom ka number dhoondh raha hoon","reason":"finding contact","status":"in_progress"}
+FIRST CALL: Return {"plan":["step1","step2",...],"action":"...","speech":"Hindi","reason":"...","status":"in_progress"}
 
-ACTIONS ({"action":"X","speech":"","reason":"","status":"in_progress|done"} + fields):
-UI: click:+node_id | type:+node_id,text | tap_xy:+x,y | long_press:+x,y | scroll_down/up | swipe:+text | back/home/recent | open_app:+app_name | open_url:+url | screenshot | copy | paste:+node_id | select_all | open_notifications
-DIRECT: call:+phone | send_sms:+phone,text | set_alarm:+text | set_timer:+text | create_event:+text | navigate:+text | search_web:+text | send_email:+text,body | flashlight:+text(on/off) | set_volume:+text | open_settings:+text
-CONTACTS: find_contact:+text(name, returns phone numbers)
-NOTIFICATIONS: read_notifications | dismiss_notification:+text(app name)
-FILES: list_files:+path | read_file:+path | write_file:+path,body | delete_file:+path | share_file:+path
-TERMUX: termux_run:+command | termux_write_file:+path,body | termux_read_file:+path
-WEB: http_get:+url | http_post:+url,body
-CONTROL: wait:+wait_seconds(5-60, real pause) | done:status="done"
+JSON FORMAT — always include ALL fields:
+{"action":"ACTION_NAME", "speech":"", "reason":"why", "status":"in_progress"}
++ extra fields based on action (see below)
 
-UI FORMAT: i=id,t=text,d=desc,T=type,c=clickable,e=editable,s=scrollable. DIFF: +=new,-=removed,~=changed.
+UI ACTIONS (need screen):
+- click: +node_id (integer) | type: +node_id,text | tap_xy: +x,y | long_press: +x,y
+- scroll_down | scroll_up | swipe: +text(left/right/up/down)
+- back | home | recent | open_app: +app_name | open_url: +url
+- screenshot | copy | paste: +node_id | select_all | open_notifications
+
+FAST ACTIONS (no UI needed — use these when possible!):
+- call: +phone | send_sms: +phone,text | set_alarm: +text | set_timer: +text
+- navigate: +text | search_web: +text | flashlight: +text(on/off) | set_volume: +text
+- find_contact: +text(name) | read_notifications | dismiss_notification: +text
+- list_files: +path | read_file: +path | write_file: +path,body
+- termux_run: +command | termux_write_file: +path,body | termux_read_file: +path
+- http_get: +url | http_post: +url,body
+
+CONTROL:
+- wait: +wait_seconds(5-60). Real pause, 0 cost. Use for downloads/loading.
+- done: set status="done". Only when task TRULY complete.
+
+UI FORMAT: i=id,t=text,T=type,c=clickable. DIFF: +=new,-=removed,~=changed.
 
 RULES:
-1. DIALOGS: Any popup/dialog (OK/Cancel/Allow) → click it FIRST. Never ignore.
-2. VERIFY: Install done only when UI shows "Open" not "Install". Message done only when visible in chat. NEVER trust screenshot.
-3. SMART WAIT: Downloads/installs → wait 30-60s. 0 tokens during wait.
-4. NEVER DONE EARLY: Install→click OK→wait→verify. Message→type→send→verify.
-5. For calls: find_contact first if name given, then call with phone number.
-6. Speech: Hindi. first=confirm, middle="", done=result.
-7. Direct actions (call/sms/alarm/timer/navigate) skip UI — much faster.
-8. Termux: write code with termux_write_file, run with termux_run."""
+1. DIALOGS: Any popup (OK/Cancel/Allow) = click it FIRST.
+2. VERIFY: Install done ONLY when button shows "Open" not "Install".
+3. NEVER DONE EARLY. Install=click button+click OK+wait 30s+verify. SMS=type+send+verify.
+4. For calls by name: find_contact first, then call with returned phone number.
+5. Speech: Hindi. First=task confirm, middle="", done=result.
+6. Prefer FAST actions over UI actions when possible."""
     }
 
     var onStatusUpdate: ((String) -> Unit)? = null
     // Callback to show plan progress on overlay
     var onPlanUpdate: ((planSteps: List<String>, currentIndex: Int, completedIndices: Set<Int>) -> Unit)? = null
     private var currentJob: Job? = null
+    private var lastApiCallTime = 0L          // Rate limiting
+    private var consecutiveErrors = 0          // Track parse failures
 
     fun startTask(voiceCommand: String, scope: CoroutineScope) {
         currentJob?.cancel()
@@ -89,6 +104,7 @@ RULES:
         // Fresh start
         taskMemory.startNewTask(command)
         screenCache.clear()
+        consecutiveErrors = 0
 
         onStatusUpdate?.invoke("🧠 Samajh raha hoon: \"$command\"")
         Log.d(TAG, "Starting task: $command")
@@ -98,6 +114,12 @@ RULES:
             taskMemory.nextIteration()
 
             Log.d(TAG, "=== Step $iteration ===")
+
+            // RATE LIMIT: ensure minimum gap between API calls
+            val timeSinceLastCall = System.currentTimeMillis() - lastApiCallTime
+            if (timeSinceLastCall < MIN_API_INTERVAL) {
+                delay(MIN_API_INTERVAL - timeSinceLastCall)
+            }
 
             // 1. Screen padho
             val rootNode = service.getRootNode()
@@ -134,30 +156,42 @@ RULES:
             onStatusUpdate?.invoke("🤔 Step $iteration$planInfo")
 
             val llmResponse = try {
+                lastApiCallTime = System.currentTimeMillis()
                 GroqApiClient.agentChatDirect(context, messages)
             } catch (e: Exception) {
                 Log.e(TAG, "LLM call failed: ${e.message}")
                 onStatusUpdate?.invoke("❌ ${e.message?.take(50) ?: "Server error"}")
+                if (iteration < 3) {
+                    delay(3000) // Wait and retry on early failures
+                    continue
+                }
                 ttsManager.speak("Server se jawab nahi aaya.")
                 return
             }
 
             if (llmResponse == null) {
                 onStatusUpdate?.invoke("❌ Empty response from server")
-                ttsManager.speak("Server ne koi jawab nahi diya.")
-                return
+                delay(2000)
+                continue
             }
 
             Log.d(TAG, "LLM response: $llmResponse")
 
-            // 5. Parse action
+            // 5. Parse action — with consecutive error tracking
             val action = ActionExecutor.parseResponse(llmResponse)
             if (action == null) {
-                onStatusUpdate?.invoke("❌ Response samajh nahi aaya")
+                consecutiveErrors++
+                onStatusUpdate?.invoke("❌ Response samajh nahi aaya ($consecutiveErrors/$MAX_CONSECUTIVE_ERRORS)")
                 taskMemory.recordError("Invalid LLM response")
-                delay(1000)
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    onStatusUpdate?.invoke("❌ Model $MAX_CONSECUTIVE_ERRORS baar galat response de raha hai. Ruk raha hoon.")
+                    ttsManager.speak("Model samajh nahi pa raha. Doosra model try karo.")
+                    return
+                }
+                delay(2000L + (consecutiveErrors * 1000L)) // Exponential backoff
                 continue
             }
+            consecutiveErrors = 0 // Reset on successful parse
 
             // 6. Extract plan from first response → show on overlay
             if (iteration == 1) {

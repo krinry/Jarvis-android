@@ -272,8 +272,8 @@ object GroqApiClient {
         val payload = JSONObject().apply {
             put("model", model)
             put("messages", messagesArray)
-            put("temperature", 0.2)
-            put("max_tokens", 300)
+            put("temperature", 0.15)
+            put("max_tokens", 700)
         }
 
         Log.d(TAG, "Agent LLM: $model via ${provider.displayName}")
