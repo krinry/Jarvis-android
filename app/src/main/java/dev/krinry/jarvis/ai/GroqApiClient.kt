@@ -211,28 +211,25 @@ object GroqApiClient {
         }
     }
 
-    // =========================================================================
-    // === Agent Chat — with rate limiting, retry, fallback ===
-    // =========================================================================
-
-    suspend fun agentChat(
-        context: Context, systemPrompt: String,
-        history: List<Pair<String, String>>, currentMessage: String
+    /**
+     * Agent chat — takes pre-built messages (no history assembly here).
+     *
+     * AgentLlmEngine now builds exactly 2-3 messages:
+     * [system, context_summary, current_ui]
+     *
+     * This method handles: rate limiting, retry, fallback provider.
+     */
+    suspend fun agentChatDirect(
+        context: Context,
+        messages: List<Map<String, String>>
     ): String? = withContext(Dispatchers.IO) {
         val provider = getActiveProvider(context)
-        val maxRetries = 2  // 2 retries max for speed
+        val maxRetries = 2
         var useFallback = false
 
         for (attempt in 1..maxRetries) {
             try {
                 checkAndThrottleRateLimit(context)
-
-                val messages = mutableListOf<Map<String, String>>()
-                messages.add(mapOf("role" to "system", "content" to systemPrompt))
-                for ((role, content) in history) {
-                    messages.add(mapOf("role" to role, "content" to content))
-                }
-                messages.add(mapOf("role" to "user", "content" to currentMessage))
 
                 val apiKey = provider.getApiKey(context)
                     ?: throw Exception("No API key for ${provider.displayName}")
@@ -246,15 +243,15 @@ object GroqApiClient {
 
             } catch (e: RateLimitException) {
                 Log.w(TAG, "Rate limit: waiting ${e.retryAfterMs}ms (attempt $attempt)")
-                delay(e.retryAfterMs.coerceAtMost(8000L)) // Cap rate limit wait
-                useFallback = true // Switch to fallback immediately
+                delay(e.retryAfterMs.coerceAtMost(8000L))
+                useFallback = true
 
             } catch (e: Exception) {
                 Log.w(TAG, "Agent chat attempt $attempt failed: ${e.message}")
                 if (attempt < maxRetries) {
-                    delay(1000L) // Short 1s retry delay
+                    delay(1000L)
                 } else {
-                    throw e // Propagate to caller on last attempt
+                    throw e
                 }
             }
         }

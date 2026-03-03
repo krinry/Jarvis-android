@@ -119,11 +119,17 @@ object UiTreeExtractor {
         return nodes
     }
 
+    // Types where node_id click reliably works — no need for x,y coordinates
+    private val STANDARD_CLICK_TYPES = setOf(
+        "Button", "EditText", "ImageButton", "CheckBox", "RadioButton",
+        "Switch", "ToggleButton", "Spinner", "SeekBar"
+    )
+
     /**
      * Ultra-compact JSON for LLM — minimizes token usage.
      * Short keys: i=id, t=text, d=desc, T=type, x=centerX, y=centerY
      * Only includes non-empty/non-default fields.
-     * ~40-60% smaller than verbose JSON.
+     * x,y only for nodes needing gesture-tap fallback (saves ~15% per node).
      */
     fun toJson(nodes: List<UiNode>): String {
         val sb = StringBuilder("[")
@@ -153,8 +159,13 @@ object UiTreeExtractor {
                 else -> node.className.take(10)
             }
             sb.append(",\"T\":\"").append(shortType).append("\"")
-            sb.append(",\"x\":").append(node.bounds.centerX())
-            sb.append(",\"y\":").append(node.bounds.centerY())
+
+            // x,y only for non-standard types that may need gesture tap fallback
+            val needsCoords = node.className !in STANDARD_CLICK_TYPES
+            if (needsCoords) {
+                sb.append(",\"x\":").append(node.bounds.centerX())
+                sb.append(",\"y\":").append(node.bounds.centerY())
+            }
 
             // Only actionable flags that are true
             if (node.clickable) sb.append(",\"c\":1")
