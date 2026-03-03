@@ -140,6 +140,7 @@ object GroqApiClient {
             .addFormDataPart("model", WHISPER_MODEL)
             .addFormDataPart("file", audioFile.name, audioFile.asRequestBody(mimeType.toMediaType()))
             .addFormDataPart("response_format", "text")
+            .addFormDataPart("prompt", "Transcribe exactly what is said. The language is Hindi, English, or Hinglish (Hindi written in English/Latin script). Do not translate.")
         language?.let { builder.addFormDataPart("language", it) }
 
         val request = Request.Builder()

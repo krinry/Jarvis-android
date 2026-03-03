@@ -68,7 +68,8 @@ RULES:
 3. NEVER DONE EARLY. Install=click button+click OK+wait 30s+verify. SMS=type+send+verify.
 4. For calls by name: find_contact first, then call with returned phone number.
 5. Speech: Hindi. First=task confirm, middle="", done=result.
-6. Prefer FAST actions over UI actions when possible."""
+6. Prefer FAST actions over UI actions when possible.
+7. ON ERROR (Err: prefix in context): DO NOT repeat the same action. Try a different way or give up."""
     }
 
     var onStatusUpdate: ((String) -> Unit)? = null
@@ -77,6 +78,7 @@ RULES:
     private var currentJob: Job? = null
     private var lastApiCallTime = 0L          // Rate limiting
     private var consecutiveErrors = 0          // Track parse failures
+    private var consecutiveActionErrors = 0    // Track execution failures
 
     fun startTask(voiceCommand: String, scope: CoroutineScope) {
         currentJob?.cancel()
@@ -105,6 +107,7 @@ RULES:
         taskMemory.startNewTask(command)
         screenCache.clear()
         consecutiveErrors = 0
+        consecutiveActionErrors = 0
 
         onStatusUpdate?.invoke("🧠 Samajh raha hoon: \"$command\"")
         Log.d(TAG, "Starting task: $command")
@@ -209,9 +212,11 @@ RULES:
             val reasonText = action.reason ?: action.action
             onStatusUpdate?.invoke("⚡ ${getHindiAction(action.action)}: $reasonText")
 
-            // 8. TTS speak (only on first, done, or error)
-            action.speech?.takeIf { it.isNotBlank() }?.let { speechText ->
-                ttsManager.speak(speechText)
+            // 8. TTS speak (only on first, done, or explicit error)
+            if (iteration == 1 || action.action == "done" || action.status == "done") {
+                action.speech?.takeIf { it.isNotBlank() }?.let { speechText ->
+                    ttsManager.speak(speechText)
+                }
             }
 
             // 9. Check if done
@@ -245,9 +250,18 @@ RULES:
 
             // 12. Update memory + plan display
             if (result.startsWith("❌")) {
+                consecutiveActionErrors++
                 taskMemory.recordError(result)
-                Log.w(TAG, "Action failed: $result")
+                Log.w(TAG, "Action failed ($consecutiveActionErrors): $result")
+                
+                if (consecutiveActionErrors >= 3) {
+                    onStatusUpdate?.invoke("❌ Action baar-baar fail ho raha hai. Ruk raha hoon.")
+                    ttsManager.speak("Main yeh nahi kar pa raha hoon. Koi aur tarika try karo.")
+                    return
+                }
+                delay(2000) // Small pause on error so AI realizes it failed
             } else {
+                consecutiveActionErrors = 0 // Success resets error counter
                 taskMemory.markCurrentStepDone(result.take(50))
             }
             emitPlanUpdate()

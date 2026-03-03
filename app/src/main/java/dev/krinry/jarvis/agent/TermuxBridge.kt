@@ -35,7 +35,7 @@ object TermuxBridge {
 
         return when (action.action) {
             "termux_run" -> runCommand(action, context)
-            "termux_write_file" -> writeFile(action)
+            "termux_write_file" -> writeFile(action, context)
             "termux_read_file" -> readFile(action)
             else -> "❓ Unknown termux action: ${action.action}"
         }
@@ -72,23 +72,37 @@ object TermuxBridge {
     }
 
     /**
-     * Write a file to Termux home directory.
+     * Write a file to Termux home directory via RUN_COMMAND.
      * AI sends: {"action":"termux_write_file","path":"app.py","body":"print('hello')"}
      */
-    private fun writeFile(action: ActionExecutor.AgentAction): String {
+    private fun writeFile(action: ActionExecutor.AgentAction, context: Context): String {
         val path = action.path
         val body = action.body
         if (path.isNullOrBlank()) return "❌ File path nahi diya"
         if (body == null) return "❌ File content nahi diya"
 
         return try {
-            // Resolve relative paths to Termux home
             val fullPath = if (path.startsWith("/")) path else "$TERMUX_HOME/$path"
-            val file = File(fullPath)
-            file.parentFile?.mkdirs()
-            file.writeText(body)
-            Log.d(TAG, "File written: $fullPath (${body.length} chars)")
-            "✅ File likha: ${file.name} (${body.length} chars)"
+            
+            // Encode body to base64 to avoid quote escaping issues in bash commands
+            val base64Body = android.util.Base64.encodeToString(body.toByteArray(), android.util.Base64.NO_WRAP)
+            
+            // Termux has base64 built-in. We echo the base64 string and decode it into the file.
+            val command = "echo '$base64Body' | base64 -d > '$fullPath'"
+            
+            val intent = Intent("com.termux.RUN_COMMAND").apply {
+                component = ComponentName(TERMUX_PKG, TERMUX_SERVICE)
+                putExtra("com.termux.RUN_COMMAND_PATH", "$TERMUX_BIN/bash")
+                putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", command))
+                putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME)
+                putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            }
+            context.startService(intent)
+            
+            Log.d(TAG, "File written via RUN_COMMAND: $fullPath")
+            "✅ File likhne ka command bheja: $path. Wait 2-3s for completion."
+        } catch (e: SecurityException) {
+            "❌ Termux permission denied. Allow RUN_COMMAND permission."
         } catch (e: Exception) {
             Log.e(TAG, "Write file failed", e)
             "❌ File write error: ${e.message?.take(50)}"
