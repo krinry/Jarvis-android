@@ -152,6 +152,8 @@ object ActionExecutor {
             // File Manager
             "list_files", "read_file", "write_file", "delete_file", "share_file" ->
                 FileManagerExecutor.execute(action, service.applicationContext)
+            // Ask user (handled in AgentLlmEngine, but safe fallback)
+            "ask_user" -> "🗣 User se puch raha hoon..."
 
             else -> "❓ Unknown action: ${action.action}"
         }

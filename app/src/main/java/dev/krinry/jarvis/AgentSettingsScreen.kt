@@ -71,6 +71,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
     var showModelPicker by remember { mutableStateOf(false) }
     var modelPickerTarget by remember { mutableStateOf("primary") }
     var providerExpanded by remember { mutableStateOf(false) }
+    var sttProvider by remember { mutableStateOf(SecureKeyStore.getSttProvider(context)) }
 
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(500); refreshKey++ }
 
@@ -234,11 +235,11 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                             unfocusedBorderColor = DarkSurfaceVariant
                         )
                     )
-                    // Groq STT note
-                    if (selectedProviderId != "groq") {
+                    // Groq STT note (only if using whisper STT)
+                    if (selectedProviderId != "groq" && sttProvider == "whisper") {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "💡 STT (voice) always uses Groq Whisper. Set Groq API key too for voice commands.",
+                            "💡 Whisper STT uses Groq. Set Groq API key too for voice commands.",
                             fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
                         )
                     }
@@ -257,6 +258,55 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
             SettingsRow(Icons.Default.SwapHoriz, "Fallback Model",
                 fallbackModel.ifEmpty { selectedProvider.defaultFallbackModel }, JarvisAccent
             ) { modelPickerTarget = "fallback"; showModelPicker = true }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ===== STT PROVIDER =====
+            SectionHeader("Voice Recognition (STT)", Icons.Default.Mic)
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp), color = DarkCard
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("STT Engine", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(
+                                if (sttProvider == "gemini") "Gemini (Better Hindi 🇮🇳)" else "Whisper (Groq)",
+                                fontSize = 12.sp, color = DarkOnSurfaceVariant
+                            )
+                        }
+                        Row {
+                            listOf("whisper" to "Whisper", "gemini" to "Gemini").forEach { (id, label) ->
+                                val isSelected = sttProvider == id
+                                Surface(
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) JarvisPrimary else DarkSurfaceVariant,
+                                    onClick = {
+                                        sttProvider = id
+                                        SecureKeyStore.setSttProvider(context, id)
+                                    }
+                                ) {
+                                    Text(
+                                        label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        fontSize = 13.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) Color.White else DarkOnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (sttProvider == "gemini" && SecureKeyStore.getProviderApiKey(context, "gemini").isNullOrEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "⚠️ Gemini STT ke liye Gemini API key set karo (Provider dropdown mein).",
+                            fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(40.dp))
 

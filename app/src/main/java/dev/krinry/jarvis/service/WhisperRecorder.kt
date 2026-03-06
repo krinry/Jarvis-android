@@ -5,7 +5,9 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import dev.krinry.jarvis.ai.GeminiSttClient
 import dev.krinry.jarvis.ai.GroqApiClient
+import dev.krinry.jarvis.security.SecureKeyStore
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
@@ -97,7 +99,19 @@ class WhisperRecorder(private val context: Context) {
                     return@launch
                 }
 
-                val transcript = GroqApiClient.transcribeAudio(context, wavFile, null)
+                // Route to selected STT provider
+                val sttProvider = SecureKeyStore.getSttProvider(context)
+                val transcript = if (sttProvider == "gemini") {
+                    withContext(Dispatchers.Main) { onStatus("🔄 Gemini se transcribe ho raha hai...") }
+                    GeminiSttClient.transcribeAudio(context, wavFile, null)
+                        ?: run {
+                            // Fallback to Whisper if Gemini fails
+                            withContext(Dispatchers.Main) { onStatus("🔄 Whisper fallback...") }
+                            GroqApiClient.transcribeAudio(context, wavFile, null)
+                        }
+                } else {
+                    GroqApiClient.transcribeAudio(context, wavFile, null)
+                }
                 wavFile.delete()
 
                 withContext(Dispatchers.Main) {

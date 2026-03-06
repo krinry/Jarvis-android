@@ -122,6 +122,48 @@ class FloatingBubbleService : Service() {
                 updatePlanOverlay(steps, currentIdx, completedSet)
             }
         }
+        // Ask user callback — pause agent, record voice, return answer
+        agentEngine?.onAskUser = { question ->
+            // This runs inside the agent's coroutine, so we use CompletableDeferred
+            val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
+            
+            scope.launch(Dispatchers.Main) {
+                addSubtitle("🗣 $question")
+                vibratePattern(longArrayOf(0, 100, 100, 100, 100, 100)) // Alert vibration
+                
+                // Small delay to let TTS finish speaking the question
+                kotlinx.coroutines.delay(2000)
+                
+                // Start recording user's voice answer
+                whisperRecorder?.startRecording(
+                    scope = scope,
+                    onStateChange = { listening ->
+                        if (listening) {
+                            addSubtitle("🎙 Sun raha hoon... bol do jawab")
+                        }
+                    },
+                    onStatus = { status -> addSubtitle(status) },
+                    onTranscript = { transcript ->
+                        deferred.complete(transcript)
+                    }
+                )
+                
+                // Auto-stop recording after 8 seconds
+                scope.launch {
+                    kotlinx.coroutines.delay(8000)
+                    if (whisperRecorder?.isListening == true) {
+                        whisperRecorder?.stopListening()
+                    }
+                }
+            }
+            
+            // Wait for the answer (timeout 20s total)
+            try {
+                kotlinx.coroutines.withTimeout(20_000) { deferred.await() }
+            } catch (e: Exception) {
+                null
+            }
+        }
         isRunning = true
         startForegroundNotification()
     }

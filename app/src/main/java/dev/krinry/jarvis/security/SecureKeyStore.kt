@@ -25,6 +25,7 @@ object SecureKeyStore {
     private const val KEY_PRIMARY_MODEL = "primary_model"
     private const val KEY_FALLBACK_MODEL = "fallback_model"
     private const val KEY_REQUEST_DELAY_MS = "request_delay_ms" // Configurable delay
+    private const val KEY_STT_PROVIDER = "stt_provider"          // "whisper" or "gemini"
 
     private fun getEncryptedPrefs(context: Context) = try {
         val masterKey = MasterKey.Builder(context)
@@ -183,5 +184,17 @@ object SecureKeyStore {
 
     fun isAgentEnabled(context: Context): Boolean {
         return getEncryptedPrefs(context).getBoolean(KEY_AGENT_ENABLED, false)
+    }
+
+    // =========================================================================
+    // === STT Provider (whisper / gemini) ===
+    // =========================================================================
+
+    fun setSttProvider(context: Context, provider: String) {
+        getEncryptedPrefs(context).edit().putString(KEY_STT_PROVIDER, provider).apply()
+    }
+
+    fun getSttProvider(context: Context): String {
+        return getEncryptedPrefs(context).getString(KEY_STT_PROVIDER, "whisper") ?: "whisper"
     }
 }

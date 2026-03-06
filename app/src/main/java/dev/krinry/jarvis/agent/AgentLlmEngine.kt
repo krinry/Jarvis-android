@@ -28,9 +28,9 @@ class AgentLlmEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "AgentLlmEngine"
-        private const val MAX_ITERATIONS = 25
-        private const val SCREEN_SETTLE_DELAY = 1500L   // 1.5s between iterations (was 600ms)
-        private const val MIN_API_INTERVAL = 2000L      // Minimum 2s between API calls
+        private const val MAX_ITERATIONS = 50            // More steps for complex tasks
+        private const val SCREEN_SETTLE_DELAY = 1200L   // 1.2s between iterations
+        private const val MIN_API_INTERVAL = 1800L      // Minimum 1.8s between API calls
         private const val MAX_CONSECUTIVE_ERRORS = 3    // Stop after 3 parse failures
 
         private const val SYSTEM_PROMPT = """You are Krinry, AI phone assistant. Control phone via AccessibilityService.
@@ -59,6 +59,7 @@ FAST ACTIONS (no UI needed — use these when possible!):
 CONTROL:
 - wait: +wait_seconds(5-60). Real pause, 0 cost. Use for downloads/loading.
 - done: set status="done". Only when task TRULY complete.
+- ask_user: +speech(Hindi question). PAUSE and ask user. Use when confused or need choice.
 
 UI FORMAT: i=id,t=text,T=type,c=clickable. DIFF: +=new,-=removed,~=changed.
 
@@ -69,16 +70,22 @@ RULES:
 4. For calls by name: find_contact first, then call with returned phone number.
 5. Speech: Hindi. First=task confirm, middle="", done=result.
 6. Prefer FAST actions over UI actions when possible.
-7. ON ERROR (Err: prefix in context): DO NOT repeat the same action. Try a different way or give up."""
+7. ON ERROR (Err: prefix in context): DO NOT repeat the same action. Try a different way or give up.
+8. ASK USER when confused: If task is unclear, multiple options exist, or you need a choice — use ask_user action.
+   Examples: "Kaun sa contact? Mom ya Dad?", "YouTube Studio ya YouTube app?", "WiFi ya Mobile data se download karu?"
+   NEVER assume. ALWAYS ask when unsure."""
     }
 
     var onStatusUpdate: ((String) -> Unit)? = null
     // Callback to show plan progress on overlay
     var onPlanUpdate: ((planSteps: List<String>, currentIndex: Int, completedIndices: Set<Int>) -> Unit)? = null
+    // Callback to ask user a question — returns user's voice answer
+    var onAskUser: (suspend (question: String) -> String?)? = null
     private var currentJob: Job? = null
     private var lastApiCallTime = 0L          // Rate limiting
     private var consecutiveErrors = 0          // Track parse failures
     private var consecutiveActionErrors = 0    // Track execution failures
+    private var lastUserReply: String? = null  // User's answer to ask_user
 
     fun startTask(voiceCommand: String, scope: CoroutineScope) {
         currentJob?.cancel()
@@ -108,6 +115,7 @@ RULES:
         screenCache.clear()
         consecutiveErrors = 0
         consecutiveActionErrors = 0
+        lastUserReply = null
 
         onStatusUpdate?.invoke("🧠 Samajh raha hoon: \"$command\"")
         Log.d(TAG, "Starting task: $command")
@@ -149,7 +157,9 @@ RULES:
             } else {
                 // Subsequent: compact memory + UI diff
                 val memoryContext = taskMemory.toCompactContext()
-                messages.add(mapOf("role" to "user", "content" to "MEM:$memoryContext\nUI:$uiData"))
+                val userReplyPart = lastUserReply?.let { "|UserReply:$it" } ?: ""
+                messages.add(mapOf("role" to "user", "content" to "MEM:$memoryContext$userReplyPart\nUI:$uiData"))
+                lastUserReply = null // Clear after sending
             }
 
             // 4. LLM call — show plan progress
@@ -212,11 +222,33 @@ RULES:
             val reasonText = action.reason ?: action.action
             onStatusUpdate?.invoke("⚡ ${getHindiAction(action.action)}: $reasonText")
 
-            // 8. TTS speak (only on first, done, or explicit error)
-            if (iteration == 1 || action.action == "done" || action.status == "done") {
+            // 8. TTS speak (only on first, done, ask_user)
+            if (iteration == 1 || action.action == "done" || action.status == "done" || action.action == "ask_user") {
                 action.speech?.takeIf { it.isNotBlank() }?.let { speechText ->
                     ttsManager.speak(speechText)
                 }
+            }
+
+            // 8.5. ASK USER — pause and wait for voice answer
+            if (action.action == "ask_user") {
+                val question = action.speech ?: action.text ?: "Kya karna hai?"
+                onStatusUpdate?.invoke("🗣 Puch raha hoon: $question")
+                Log.d(TAG, "Ask user: $question")
+                
+                // Wait for user's voice response
+                val userAnswer = onAskUser?.invoke(question)
+                if (userAnswer.isNullOrBlank()) {
+                    onStatusUpdate?.invoke("❌ Koi jawab nahi mila. Continue kar raha hoon.")
+                    taskMemory.recordError("User did not respond")
+                } else {
+                    lastUserReply = userAnswer
+                    onStatusUpdate?.invoke("💬 Jawab: $userAnswer")
+                    taskMemory.markCurrentStepDone("User said: ${userAnswer.take(40)}")
+                    Log.d(TAG, "User replied: $userAnswer")
+                }
+                emitPlanUpdate()
+                delay(500)
+                continue // Next iteration with user's answer in memory
             }
 
             // 9. Check if done
@@ -363,6 +395,7 @@ RULES:
             "termux_read_file" -> "📄 Termux file padh raha hoon"
             "http_get" -> "🌐 Web data fetch"
             "http_post" -> "🌐 Web data send"
+            "ask_user" -> "🗣 User se puch raha hoon"
             else -> action
         }
     }
