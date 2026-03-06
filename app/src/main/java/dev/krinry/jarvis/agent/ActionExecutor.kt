@@ -1,5 +1,6 @@
 package dev.krinry.jarvis.agent
 
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -133,6 +134,16 @@ object ActionExecutor {
             "paste" -> executePaste(action, nodes, service)
             "select_all" -> executeSelectAll(action, nodes, service)
             "open_notifications" -> { service.openNotifications(); "✅ Notifications khol diya" }
+            "read_clipboard" -> {
+                val clipboard = service.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString()?.take(500) ?: ""
+                    if (text.isNotEmpty()) "✅ Clipboard: $text" else "✅ Clipboard khaali hai"
+                } else {
+                    "✅ Clipboard khaali hai"
+                }
+            }
             "wait" -> "⏳ Screen load ho raha hai..."
             "done" -> "✅ Kaam ho gaya!"
 

@@ -46,7 +46,7 @@ UI ACTIONS (need screen):
 - click: +node_id (integer) | type: +node_id,text | tap_xy: +x,y | long_press: +x,y
 - scroll_down | scroll_up | swipe: +text(left/right/up/down)
 - back | home | recent | open_app: +app_name | open_url: +url
-- screenshot | copy | paste: +node_id | select_all | open_notifications
+- screenshot | analyze_screen: +text(question) | copy | paste: +node_id | select_all | open_notifications | read_clipboard
 
 FAST ACTIONS (no UI needed — use these when possible!):
 - call: +phone | send_sms: +phone,text | set_alarm: +text | set_timer: +text
@@ -271,9 +271,11 @@ RULES:
                 continue // Go back to top, re-read screen, THEN call API
             }
 
-            // 11. Execute action (WebApi is suspend, others are not)
+            // 11. Execute action (WebApi/Vision are suspend, others are not)
             val result = if (action.action in listOf("http_get", "http_post")) {
                 WebApiExecutor.execute(action)
+            } else if (action.action == "analyze_screen") {
+                ScreenshotVision.analyzeScreen(action.text ?: "Check screen", service.applicationContext)
             } else {
                 ActionExecutor.execute(action, uiNodes)
             }
@@ -396,6 +398,8 @@ RULES:
             "http_get" -> "🌐 Web data fetch"
             "http_post" -> "🌐 Web data send"
             "ask_user" -> "🗣 User se puch raha hoon"
+            "analyze_screen" -> "👁 Screen dekh raha hoon"
+            "read_clipboard" -> "📋 Clipboard padh raha hoon"
             else -> action
         }
     }
