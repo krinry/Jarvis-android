@@ -53,16 +53,21 @@ object ActionExecutor {
             AgentAction(
                 action = obj.optString("action", "wait"),
                 nodeId = if (obj.has("node_id") && !obj.isNull("node_id")) obj.optInt("node_id", -1) else null,
-                text = obj.optString("text", "").takeIf { it.isNotEmpty() },
-                appName = obj.optString("app_name", "").takeIf { it.isNotEmpty() },
-                url = obj.optString("url", "").takeIf { it.isNotEmpty() },
+                text = obj.optString("text", "").takeIf { it.isNotEmpty() }
+                    ?: obj.optString("query", "").takeIf { it.isNotEmpty() }
+                    ?: obj.optString("name", "").takeIf { it.isNotEmpty() },
+                appName = obj.optString("app_name", "").takeIf { it.isNotEmpty() }
+                    ?: obj.optString("app", "").takeIf { it.isNotEmpty() },
+                url = obj.optString("url", "").takeIf { it.isNotEmpty() }
+                    ?: obj.optString("link", "").takeIf { it.isNotEmpty() },
                 speech = obj.optString("speech", "").takeIf { it.isNotEmpty() },
                 status = obj.optString("status", "in_progress"),
-                x = if (obj.has("x")) obj.optInt("x") else null,
-                y = if (obj.has("y")) obj.optInt("y") else null,
+                x = if (obj.has("x") && !obj.isNull("x")) obj.optInt("x", -1) else null,
+                y = if (obj.has("y") && !obj.isNull("y")) obj.optInt("y", -1) else null,
                 reason = obj.optString("reason", "").takeIf { it.isNotEmpty() },
                 waitSeconds = if (obj.has("wait_seconds")) obj.optInt("wait_seconds", 10) else null,
-                phone = obj.optString("phone", "").takeIf { it.isNotEmpty() },
+                phone = obj.optString("phone", "").takeIf { it.isNotEmpty() }
+                    ?: obj.optString("number", "").takeIf { it.isNotEmpty() },
                 body = obj.optString("body", "").takeIf { it.isNotEmpty() },
                 path = obj.optString("path", "").takeIf { it.isNotEmpty() },
                 command = obj.optString("command", "").takeIf { it.isNotEmpty() }

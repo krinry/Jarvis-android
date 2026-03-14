@@ -6,4 +6,5 @@
     android:notificationTimeout="200"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:settingsActivity="com.krinry.wokitoki.MainActivity" />
+    android:canTakeScreenshot="true"
+    android:settingsActivity="dev.krinry.jarvis.MainActivity" />

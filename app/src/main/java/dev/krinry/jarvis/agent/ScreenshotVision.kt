@@ -80,32 +80,36 @@ object ScreenshotVision {
 
         val deferred = CompletableDeferred<Bitmap?>()
 
-        service.takeScreenshot(
-            android.view.Display.DEFAULT_DISPLAY,
-            service.mainExecutor,
-            object : AccessibilityService.TakeScreenshotCallback {
-                override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                    try {
-                        val hardwareBuffer = result.hardwareBuffer
-                        val colorSpace = result.colorSpace
-                        val bitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace)
-                        hardwareBuffer.close()
-                        // Convert from HARDWARE to SOFTWARE for processing
-                        val softBitmap = bitmap?.copy(Bitmap.Config.ARGB_8888, false)
-                        bitmap?.recycle()
-                        deferred.complete(softBitmap)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Screenshot decode failed", e)
+        try {
+            service.takeScreenshot(
+                android.view.Display.DEFAULT_DISPLAY,
+                service.mainExecutor,
+                object : AccessibilityService.TakeScreenshotCallback {
+                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                        try {
+                            val hardwareBuffer = result.hardwareBuffer
+                            val colorSpace = result.colorSpace
+                            val bitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace)
+                            hardwareBuffer.close()
+                            val softBitmap = bitmap?.copy(Bitmap.Config.ARGB_8888, false)
+                            bitmap?.recycle()
+                            deferred.complete(softBitmap)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Screenshot decode failed", e)
+                            deferred.complete(null)
+                        }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        Log.e(TAG, "Screenshot failed: errorCode=$errorCode")
                         deferred.complete(null)
                     }
                 }
-
-                override fun onFailure(errorCode: Int) {
-                    Log.e(TAG, "Screenshot failed: errorCode=$errorCode")
-                    deferred.complete(null)
-                }
-            }
-        )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to call takeScreenshot API", e)
+            deferred.complete(null)
+        }
 
         return try {
             kotlinx.coroutines.withTimeout(5000) { deferred.await() }

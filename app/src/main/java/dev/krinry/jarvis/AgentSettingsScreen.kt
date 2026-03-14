@@ -56,8 +56,17 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
         ActivityResultContracts.RequestPermission()
     ) { isGranted -> hasAudioPermission = isGranted; if (isGranted) refreshKey++ }
 
+    var hasContactsPermission by remember(refreshKey) {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted -> hasContactsPermission = isGranted; if (isGranted) refreshKey++ }
+
     var agentEnabled by remember { mutableStateOf(SecureKeyStore.isAgentEnabled(context)) }
-    val allReady = isAccessibilityEnabled && hasOverlayPermission && hasAudioPermission
+    val allReady = isAccessibilityEnabled && hasOverlayPermission && hasAudioPermission && hasContactsPermission
 
     // Provider state
     val providers = remember { GroqApiClient.getProviders() }
@@ -148,6 +157,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                 }
             }
             PermissionRow(Icons.Default.Mic, "Microphone", "Voice commands", hasAudioPermission) { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+            PermissionRow(Icons.Default.Contacts, "Contacts", "Required to call/SMS names", hasContactsPermission) { contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS) }
 
             if (agentEnabled) {
                 Spacer(Modifier.height(8.dp))
