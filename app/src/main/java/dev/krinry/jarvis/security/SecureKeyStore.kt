@@ -29,6 +29,7 @@ object SecureKeyStore {
     private const val KEY_TTS_PROVIDER = "tts_provider"          // "platform" or "gemini"
     private const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
     private const val KEY_NATIVE_AUDIO_DIALOG_ENABLED = "native_audio_dialog_enabled"
+    private const val KEY_DARK_MODE = "dark_mode_enabled"
 
     private fun getEncryptedPrefs(context: Context) = try {
         val masterKey = MasterKey.Builder(context)
@@ -231,5 +232,17 @@ object SecureKeyStore {
 
     fun isNativeAudioEnabled(context: Context): Boolean {
         return getEncryptedPrefs(context).getBoolean(KEY_NATIVE_AUDIO_DIALOG_ENABLED, false)
+    }
+
+    // =========================================================================
+    // === Dark / Light Theme ===
+    // =========================================================================
+
+    fun setDarkMode(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_DARK_MODE, enabled).apply()
+    }
+
+    fun isDarkMode(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_DARK_MODE, true)
     }
 }
