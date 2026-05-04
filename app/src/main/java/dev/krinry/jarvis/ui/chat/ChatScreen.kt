@@ -1,10 +1,12 @@
 package dev.krinry.jarvis.ui.chat
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -55,6 +57,8 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
+    onThemeToggle: () -> Unit,
+    isDarkMode: Boolean,
     viewModel: ChatViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -63,6 +67,10 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Keyboard visibility
+    val imeInsets = WindowInsets.ime
+    val isKeyboardVisible = imeInsets.asPaddingValues().calculateBottomPadding() > 0.dp
 
     var inputText by remember { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf(listOf<Attachment>()) }
@@ -113,6 +121,31 @@ fun ChatScreen(
         context, Manifest.permission.RECORD_AUDIO
     ) == PackageManager.PERMISSION_GRANTED
 
+    // Voice typing (speech to text)
+    val voiceInputLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            data?.firstOrNull()?.let { recognizedText ->
+                inputText = if (inputText.isBlank()) recognizedText else "$inputText $recognizedText"
+            }
+        }
+    }
+
+    fun startVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
+        }
+        try {
+            voiceInputLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Voice input not available", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -125,6 +158,25 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // Jarvis toggle (agent on/off) - show in both themes
+                    IconButton(onClick = {
+                        val newState = !jarvisEnabled
+                        SecureKeyStore.setAgentEnabled(context, newState)
+                        jarvisEnabled = newState
+                        if (newState) startBubbleService(context) else stopBubbleService(context)
+                    }) {
+                        Icon(
+                            imageVector = if (jarvisEnabled) Icons.Default.PowerSettingsNew else Icons.Default.PowerOff,
+                            contentDescription = if (jarvisEnabled) "Jarvis On" else "Jarvis Off",
+                            tint = if (jarvisEnabled) JarvisSecondary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onThemeToggle) {
+                        Icon(
+                            imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Toggle Theme"
+                        )
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -139,7 +191,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .padding(bottom = 20.dp), // Extra bottom padding for navigation buttons
+                    .padding(bottom = if (isKeyboardVisible) 8.dp else 20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Pending attachments
@@ -152,33 +204,6 @@ fun ChatScreen(
                             AttachmentChip(att) {
                                 pendingAttachments = pendingAttachments.toMutableList().apply { removeAt(idx) }
                             }
-                        }
-                    }
-                }
-
-                // Suggested Prompts/Chips
-                val suggestedPrompts = listOf("Generate Report", "Review Security Groups")
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    suggestedPrompts.forEach { prompt ->
-                        Surface(
-                            onClick = { inputText = prompt },
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            modifier = Modifier
-                                .height(28.dp)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                        ) {
-                            Text(
-                                text = prompt,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                letterSpacing = 0.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
                         }
                     }
                 }
@@ -198,20 +223,16 @@ fun ChatScreen(
                     isLoading = isLoading,
                     placeholder = "Ask anything",
                     enabled = true,
-                    onMicClick = if (hasMicPermission) {
-                        {
-                            Toast.makeText(context, "Tap floating bubble for voice", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
-                    },
+                    onMicClick = { startVoiceInput() },
                     onAttachClick = { showAttachSheet = true },
                     selectedModel = selectedModel,
                     onModelChange = { model ->
                         selectedModel = model
                         viewModel.setModel(model)
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 8.dp)
                 )
             }
         },
@@ -222,80 +243,21 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // System Status Indicator
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(50))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Animated ping effect
-                        Box {
-                            val infiniteTransition = rememberInfiniteTransition(label = "ping")
-                            val scale by infiniteTransition.animateFloat(
-                                initialValue = 1f,
-                                targetValue = 1.5f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = LinearEasing),
-                                    repeatMode = RepeatMode.Restart
-                                ),
-                                label = "scale"
-                            )
-                            val alpha by infiniteTransition.animateFloat(
-                                initialValue = 0.75f,
-                                targetValue = 0f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = LinearEasing),
-                                    repeatMode = RepeatMode.Restart
-                                ),
-                                label = "alpha"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .scale(scale)
-                                    .background(JarvisSecondary.copy(alpha = alpha), CircleShape)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(JarvisSecondary, CircleShape)
-                            )
-                        }
-                        Text(
-                            "System Online",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 0.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-
             if (messages.isEmpty()) {
                 EmptyChatPlaceholder()
             } else {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 32.dp, horizontal = 16.dp)
+                    contentPadding = PaddingValues(
+                        top = 32.dp,
+                        bottom = if (isKeyboardVisible) 16.dp else 100.dp,
+                        start = 16.dp,
+                        end = 16.dp
+                    )
                 ) {
                     item {
-                        Spacer(modifier = Modifier.height(32.dp))
+                        Spacer(modifier = Modifier.height(if (isKeyboardVisible) 8.dp else 16.dp))
                     }
                     items(messages, key = { it.id }) { msg ->
                         ChatMessageItem(message = msg)

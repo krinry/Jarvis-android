@@ -2,7 +2,9 @@ package dev.krinry.jarvis.ui.chat
 
 import android.net.Uri
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,34 +41,47 @@ fun ChatMessageItem(message: ChatMessage, onAttachmentClick: (Attachment) -> Uni
 
     val bubbleColor = when {
         isError -> MaterialTheme.colorScheme.errorContainer
-        isUser -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        isUser -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceContainerLowest
     }
 
     val textColor = when {
         isError -> MaterialTheme.colorScheme.onErrorContainer
-        isUser -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        isUser -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurface
     }
+
+    val cornerRadius = RoundedCornerShape(
+        topStart = if (isUser) 16.dp else 4.dp,
+        topEnd = if (isUser) 4.dp else 16.dp,
+        bottomStart = 16.dp,
+        bottomEnd = 16.dp
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 320.dp)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = if (isUser) 16.dp else 4.dp,
-                        topEnd = if (isUser) 4.dp else 16.dp,
-                        bottomStart = 16.dp,
-                        bottomEnd = 16.dp
-                    )
+                .widthIn(max = 400.dp)
+                .then(
+                    if (!isUser && !isError) {
+                        Modifier
+                            .clip(cornerRadius)
+                            .background(bubbleColor)
+                            .border(
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                cornerRadius
+                            )
+                    } else {
+                        Modifier
+                            .clip(cornerRadius)
+                            .background(bubbleColor)
+                    }
                 )
-                .background(bubbleColor)
                 .padding(12.dp)
                 .animateContentSize()
         ) {

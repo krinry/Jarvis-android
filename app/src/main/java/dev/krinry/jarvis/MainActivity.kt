@@ -13,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dev.krinry.jarvis.data.chat.ChatDatabase
+import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.ui.chat.ChatHistoryDrawerContent
 import dev.krinry.jarvis.ui.chat.ChatScreen
 import dev.krinry.jarvis.ui.settings.SettingsScreen
@@ -24,7 +25,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            JarvisTheme {
+            var isDarkMode by remember { mutableStateOf(SecureKeyStore.isDarkMode(this)) }
+            
+            JarvisTheme(darkTheme = isDarkMode) {
                 val navController = rememberNavController()
                 val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                 val scope = rememberCoroutineScope()
@@ -50,7 +53,12 @@ class MainActivity : ComponentActivity() {
                         composable("chat") {
                             ChatScreen(
                                 onOpenHistory = { scope.launch { drawerState.open() } },
-                                onOpenSettings = { navController.navigate("settings") }
+                                onOpenSettings = { navController.navigate("settings") },
+                                onThemeToggle = { 
+                                    isDarkMode = !isDarkMode
+                                    SecureKeyStore.setDarkMode(this@MainActivity, isDarkMode)
+                                },
+                                isDarkMode = isDarkMode
                             )
                         }
                         composable("settings") {
