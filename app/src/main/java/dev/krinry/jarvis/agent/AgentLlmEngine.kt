@@ -6,6 +6,7 @@ import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.service.AutoAgentService
 import kotlinx.coroutines.*
 import org.json.JSONObject
+import java.io.File
 
 /**
  * AgentLlmEngine — The brain of Krinry AI (Jarvis).
@@ -54,7 +55,10 @@ FAST ACTIONS (no UI needed — use these when possible!):
 - find_contact: +text(name) | read_notifications | dismiss_notification: +text
 - list_files: +path | read_file: +path | write_file: +path,body
 - termux_run: +command | termux_write_file: +path,body | termux_read_file: +path
+- termux_modify_file: +path,body(new content),text(old content to replace),command(append|prepend|replace)
 - http_get: +url | http_post: +url,body
+- open_browser: +url | execute_javascript: +text(JS code) | close_browser
+- delegate_ai: +app_name(ChatGPT/Gemini/DeepSeek/Kimi),text(full prompt). USE THIS for large code gen (>100 lines) to save tokens. After delegating, wait 30s then read_clipboard to get result.
 
 CONTROL:
 - wait: +wait_seconds(5-60). Real pause, 0 cost. Use for downloads/loading.
@@ -91,7 +95,15 @@ RULES:
         currentJob?.cancel()
         ttsManager.stop()
         currentJob = scope.launch {
-            runAgentLoop(voiceCommand)
+            runAgentLoop(command = voiceCommand, audioFile = null)
+        }
+    }
+
+    fun startTaskWithAudio(audioFile: File, initialTranscript: String?, scope: CoroutineScope) {
+        currentJob?.cancel()
+        ttsManager.stop()
+        currentJob = scope.launch {
+            runAgentLoop(command = initialTranscript, audioFile = audioFile)
         }
     }
 
@@ -102,7 +114,7 @@ RULES:
         onStatusUpdate?.invoke("⏹ Ruk gaya")
     }
 
-    private suspend fun runAgentLoop(command: String) {
+    private suspend fun runAgentLoop(command: String?, audioFile: File?) {
         val service = AutoAgentService.instance
         if (service == null) {
             onStatusUpdate?.invoke("❌ Accessibility Service on nahi hai")
@@ -111,14 +123,15 @@ RULES:
         }
 
         // Fresh start
-        taskMemory.startNewTask(command)
+        taskMemory.startNewTask(command ?: "Audio Command")
         screenCache.clear()
         consecutiveErrors = 0
         consecutiveActionErrors = 0
         lastUserReply = null
+        var hasPlayedNativeAudio = false
 
-        onStatusUpdate?.invoke("🧠 Samajh raha hoon: \"$command\"")
-        Log.d(TAG, "Starting task: $command")
+        onStatusUpdate?.invoke("🧠 Samajh raha hoon: \"${command ?: "Audio Command"}\"")
+        Log.d(TAG, "Starting task: ${command ?: "Audio Command"}")
 
         for (iteration in 1..MAX_ITERATIONS) {
             if (!isActive) return
@@ -153,7 +166,7 @@ RULES:
 
             if (iteration == 1) {
                 // First call: command + full UI → AI returns plan + first action
-                messages.add(mapOf("role" to "user", "content" to "CMD:$command\nUI:$uiData"))
+                messages.add(mapOf("role" to "user", "content" to "CMD:${command ?: "Audio Command"}\nUI:$uiData"))
             } else {
                 // Subsequent: compact memory + UI diff
                 val memoryContext = taskMemory.toCompactContext()
@@ -168,9 +181,28 @@ RULES:
             } else ""
             onStatusUpdate?.invoke("🤔 Step $iteration$planInfo")
 
-            val llmResponse = try {
+            var llmResponse: String? = null
+            try {
                 lastApiCallTime = System.currentTimeMillis()
-                GroqApiClient.agentChatDirect(context, messages)
+                if (iteration == 1 && audioFile != null && audioFile.exists()) {
+                    onStatusUpdate?.invoke("🤔 Step $iteration (Native Audio Dialog)$planInfo")
+                    val result = dev.krinry.jarvis.ai.GeminiNativeAudioClient.processAudioDialog(
+                        context, audioFile, SYSTEM_PROMPT, uiData, ttsManager
+                    )
+                    
+                    if (result.transcript != null) {
+                        taskMemory.replaceCommand(result.transcript)
+                        withContext(Dispatchers.Main) {
+                            onStatusUpdate?.invoke("🗣️ \"${result.transcript}\"")
+                        }
+                    }
+                    if (result.playedAudio) {
+                        hasPlayedNativeAudio = true
+                    }
+                    llmResponse = result.jsonResponse
+                } else {
+                    llmResponse = GroqApiClient.agentChatDirect(context, messages)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "LLM call failed: ${e.message}")
                 onStatusUpdate?.invoke("❌ ${e.message?.take(50) ?: "Server error"}")
@@ -225,7 +257,13 @@ RULES:
             // 8. TTS speak (only on first, done, ask_user)
             if (iteration == 1 || action.action == "done" || action.status == "done" || action.action == "ask_user") {
                 action.speech?.takeIf { it.isNotBlank() }?.let { speechText ->
-                    ttsManager.speak(speechText)
+                    if (!hasPlayedNativeAudio) {
+                        ttsManager.speak(speechText)
+                    } else if (iteration > 1 || action.action == "ask_user") {
+                        // After iteration 1 (or ask_user during iter 1), if we need to speak, we reset Native Audio
+                        hasPlayedNativeAudio = false
+                        ttsManager.speak(speechText)
+                    }
                 }
             }
 
@@ -276,6 +314,18 @@ RULES:
                 WebApiExecutor.execute(action)
             } else if (action.action == "analyze_screen") {
                 ScreenshotVision.analyzeScreen(action.text ?: "Check screen", service.applicationContext)
+            } else if (action.action == "execute_javascript") {
+                val script = action.text ?: action.body ?: "❌ Script nahi mili"
+                if (script.startsWith("❌")) script else AgentWebViewManager.instance?.executeJavascript(script) ?: "❌ Browser open nahi hai"
+            } else if (action.action == "open_browser") {
+                val url = action.url ?: action.text ?: "❌ URL nahi mili"
+                if (url.startsWith("❌")) url else {
+                    AgentWebViewManager.instance?.openBrowser(url)
+                    "✅ Browser open: $url"
+                }
+            } else if (action.action == "close_browser") {
+                AgentWebViewManager.instance?.closeBrowser()
+                "✅ Browser closed"
             } else {
                 ActionExecutor.execute(action, uiNodes)
             }
@@ -395,8 +445,13 @@ RULES:
             "termux_run" -> "🖥 Termux command"
             "termux_write_file" -> "✏ Termux file likh raha hoon"
             "termux_read_file" -> "📄 Termux file padh raha hoon"
+            "termux_modify_file" -> "✏️ Termux file modify kar raha hoon"
             "http_get" -> "🌐 Web data fetch"
             "http_post" -> "🌐 Web data send"
+            "open_browser" -> "🌐 Browser khol raha hoon"
+            "execute_javascript" -> "💻 Script chala raha hoon"
+            "close_browser" -> "🌐 Browser band"
+            "delegate_ai" -> "🤖 ChatGPT/Gemini se help le raha hoon"
             "ask_user" -> "🗣 User se puch raha hoon"
             "analyze_screen" -> "👁 Screen dekh raha hoon"
             "read_clipboard" -> "📋 Clipboard padh raha hoon"

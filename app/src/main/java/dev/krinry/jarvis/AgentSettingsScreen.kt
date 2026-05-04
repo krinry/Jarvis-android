@@ -81,6 +81,9 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
     var modelPickerTarget by remember { mutableStateOf("primary") }
     var providerExpanded by remember { mutableStateOf(false) }
     var sttProvider by remember { mutableStateOf(SecureKeyStore.getSttProvider(context)) }
+    var ttsProvider by remember { mutableStateOf(SecureKeyStore.getTtsProvider(context)) }
+    var wakeWordEnabled by remember { mutableStateOf(SecureKeyStore.isWakeWordEnabled(context)) }
+    var nativeAudioEnabled by remember { mutableStateOf(SecureKeyStore.isNativeAudioEnabled(context)) }
 
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(500); refreshKey++ }
 
@@ -312,6 +315,134 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "⚠️ Gemini STT ke liye Gemini API key set karo (Provider dropdown mein).",
+                            fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ===== TTS PROVIDER =====
+            SectionHeader("Voice Response (TTS)", Icons.Default.VolumeUp)
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp), color = DarkCard
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("TTS Engine", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(
+                                if (ttsProvider == "gemini") "Gemini (Natural Voice)" else "Platform (Android)",
+                                fontSize = 12.sp, color = DarkOnSurfaceVariant
+                            )
+                        }
+                        Row {
+                            listOf("platform" to "Platform", "gemini" to "Gemini").forEach { (id, label) ->
+                                val isSelected = ttsProvider == id
+                                Surface(
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) JarvisPrimary else DarkSurfaceVariant,
+                                    onClick = {
+                                        ttsProvider = id
+                                        SecureKeyStore.setTtsProvider(context, id)
+                                    }
+                                ) {
+                                    Text(
+                                        label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        fontSize = 13.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) Color.White else DarkOnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (ttsProvider == "gemini" && SecureKeyStore.getProviderApiKey(context, "gemini").isNullOrEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "⚠️ Gemini TTS ke liye Gemini API key set karo.",
+                            fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ===== WAKE WORD =====
+            SectionHeader("Always-on Wake Word", Icons.Default.RecordVoiceOver)
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp), color = DarkCard
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Listen for 'Jarvis'", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(
+                                "Say 'Jarvis' to activate without tapping",
+                                fontSize = 12.sp, color = DarkOnSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = wakeWordEnabled,
+                            onCheckedChange = { enabled ->
+                                wakeWordEnabled = enabled
+                                SecureKeyStore.setWakeWordEnabled(context, enabled)
+                                // Notify user to restart agent for wake word to take effect immediately
+                                if (agentEnabled) {
+                                    stopBubbleService(context)
+                                    startBubbleService(context)
+                                }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = JarvisPrimary.copy(alpha = 0.5f), checkedThumbColor = JarvisPrimary)
+                        )
+                    }
+                    if (wakeWordEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "🔋 Uses more battery (mic stays on in background)",
+                            fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ===== NATIVE AUDIO DIALOG =====
+            SectionHeader("Native Audio Dialog (Beta)", Icons.Default.Hearing)
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp), color = DarkCard
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Gemini 2.5 Flash Native Audio", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(
+                                "Skips STT/TTS for raw voice processing",
+                                fontSize = 12.sp, color = DarkOnSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = nativeAudioEnabled,
+                            onCheckedChange = { enabled ->
+                                nativeAudioEnabled = enabled
+                                SecureKeyStore.setNativeAudioEnabled(context, enabled)
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = JarvisPrimary.copy(alpha = 0.5f), checkedThumbColor = JarvisPrimary)
+                        )
+                    }
+                    if (nativeAudioEnabled && SecureKeyStore.getProviderApiKey(context, "gemini").isNullOrEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "⚠️ Requires Gemini API key",
                             fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
                         )
                     }

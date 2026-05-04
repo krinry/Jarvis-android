@@ -34,6 +34,7 @@ import androidx.core.app.NotificationCompat
 import dev.krinry.jarvis.MainActivity
 import dev.krinry.jarvis.R
 import dev.krinry.jarvis.agent.AgentLlmEngine
+import dev.krinry.jarvis.agent.AgentWebViewManager
 import kotlinx.coroutines.*
 
 /**
@@ -80,6 +81,8 @@ class FloatingBubbleService : Service() {
     // Extracted components
     private var whisperRecorder: WhisperRecorder? = null
     private var menuManager: BubbleMenuManager? = null
+    private var webViewManager: AgentWebViewManager? = null
+    private var wakeWordListener: WakeWordListener? = null
 
     private var isProcessingCommand = false
     private val subtitleHistory = mutableListOf<String>()
@@ -98,6 +101,29 @@ class FloatingBubbleService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         whisperRecorder = WhisperRecorder(applicationContext)
         menuManager = BubbleMenuManager(applicationContext, windowManager)
+        webViewManager = AgentWebViewManager(applicationContext, windowManager)
+        wakeWordListener = WakeWordListener(applicationContext)
+
+        if (dev.krinry.jarvis.security.SecureKeyStore.isWakeWordEnabled(applicationContext)) {
+            wakeWordListener?.startListening(scope) { command, audioFile ->
+                if (!isProcessingCommand) {
+                    vibrateShort()
+                    lastCommand = command
+                    isProcessingCommand = true
+                    wakeWordListener?.pause()
+                    subtitleHistory.clear()
+                    addSubtitle("🗣️ \"$command\"")
+                    startThinkingAnimation()
+                    if (audioFile != null) {
+                        agentEngine?.startTaskWithAudio(audioFile, command, scope)
+                    } else {
+                        agentEngine?.startTask(command, scope)
+                    }
+                } else {
+                    audioFile?.delete()
+                }
+            }
+        }
 
         agentEngine = AgentLlmEngine(applicationContext)
         agentEngine?.onStatusUpdate = { status ->
@@ -108,11 +134,13 @@ class FloatingBubbleService : Service() {
                     stopThinkingAnimation()
                     playCompletionSound()
                     vibratePattern(longArrayOf(0, 80, 60, 80))
+                    wakeWordListener?.resume()
                     // Plan stays visible — user can dismiss manually
                 } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
                     isProcessingCommand = false
                     stopThinkingAnimation()
                     vibrateShort()
+                    wakeWordListener?.resume()
                 }
             }
         }
@@ -143,7 +171,7 @@ class FloatingBubbleService : Service() {
                         }
                     },
                     onStatus = { status -> addSubtitle(status) },
-                    onTranscript = { transcript ->
+                    onResult = { transcript, _ ->
                         deferred.complete(transcript)
                     }
                 )
@@ -182,6 +210,8 @@ class FloatingBubbleService : Service() {
         whisperRecorder?.cancel()
         stopThinkingAnimation()
         menuManager?.releaseWakeLock()
+        webViewManager?.destroy()
+        wakeWordListener?.stop()
         bubbleView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         subtitleView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         planView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
@@ -392,6 +422,7 @@ class FloatingBubbleService : Service() {
                 hidePlanOverlay()
                 addSubtitle("⏹ Task cancelled")
                 vibrateShort()
+                wakeWordListener?.resume()
             }
         }
         planHeader.addView(cancelBtn)
@@ -441,6 +472,7 @@ class FloatingBubbleService : Service() {
             return
         }
         isProcessingCommand = true
+        wakeWordListener?.pause()
         subtitleHistory.clear()
         addSubtitle("🔄 Repeating: \"$cmd\"")
         startThinkingAnimation()
@@ -534,6 +566,7 @@ class FloatingBubbleService : Service() {
             stopThinkingAnimation()
             addSubtitle("⏹ Cancelled")
             vibrateShort()
+            wakeWordListener?.resume()
             return
         }
         if (whisperRecorder?.isListening == true) {
@@ -562,14 +595,22 @@ class FloatingBubbleService : Service() {
 
         vibrateShort()
         addSubtitle("🎤 Listening... tap to send")
+        wakeWordListener?.pause()
 
         whisperRecorder?.startRecording(
             scope = scope,
             onStateChange = { listening -> animateBubble(listening) },
             onStatus = { status -> addSubtitle(status) },
-            onTranscript = { transcript ->
-                if (transcript.isNullOrBlank()) {
+            onResult = { transcript, audioFile ->
+                if (audioFile != null) {
+                    isProcessingCommand = true
+                    subtitleHistory.clear()
+                    addSubtitle("🗣️ [Native Audio Dialog]")
+                    startThinkingAnimation()
+                    agentEngine?.startTaskWithAudio(audioFile, null, scope)
+                } else if (transcript.isNullOrBlank()) {
                     addSubtitle("❌ Couldn't understand, try again")
+                    wakeWordListener?.resume()
                 } else {
                     val command = stripWakeWord(transcript)
                     lastCommand = command

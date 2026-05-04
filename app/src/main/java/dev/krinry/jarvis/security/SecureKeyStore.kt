@@ -26,6 +26,9 @@ object SecureKeyStore {
     private const val KEY_FALLBACK_MODEL = "fallback_model"
     private const val KEY_REQUEST_DELAY_MS = "request_delay_ms" // Configurable delay
     private const val KEY_STT_PROVIDER = "stt_provider"          // "whisper" or "gemini"
+    private const val KEY_TTS_PROVIDER = "tts_provider"          // "platform" or "gemini"
+    private const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
+    private const val KEY_NATIVE_AUDIO_DIALOG_ENABLED = "native_audio_dialog_enabled"
 
     private fun getEncryptedPrefs(context: Context) = try {
         val masterKey = MasterKey.Builder(context)
@@ -196,5 +199,37 @@ object SecureKeyStore {
 
     fun getSttProvider(context: Context): String {
         return getEncryptedPrefs(context).getString(KEY_STT_PROVIDER, "whisper") ?: "whisper"
+    }
+
+    // =========================================================================
+    // === TTS Provider (platform / gemini) ===
+    // =========================================================================
+
+    fun setTtsProvider(context: Context, provider: String) {
+        getEncryptedPrefs(context).edit().putString(KEY_TTS_PROVIDER, provider).apply()
+    }
+
+    fun getTtsProvider(context: Context): String {
+        return getEncryptedPrefs(context).getString(KEY_TTS_PROVIDER, "platform") ?: "platform"
+    }
+
+    // =========================================================================
+    // === Wake Word Settings ===
+    // =========================================================================
+
+    fun setWakeWordEnabled(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_WAKE_WORD_ENABLED, enabled).apply()
+    }
+
+    fun isWakeWordEnabled(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_WAKE_WORD_ENABLED, true)
+    }
+
+    fun setNativeAudioEnabled(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_NATIVE_AUDIO_DIALOG_ENABLED, enabled).apply()
+    }
+
+    fun isNativeAudioEnabled(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_NATIVE_AUDIO_DIALOG_ENABLED, false)
     }
 }

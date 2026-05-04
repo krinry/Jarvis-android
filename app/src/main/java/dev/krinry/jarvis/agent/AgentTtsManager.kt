@@ -9,7 +9,11 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import dev.krinry.jarvis.ai.GeminiTtsClient
 import dev.krinry.jarvis.security.SecureKeyStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
@@ -60,7 +64,7 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
     }
 
     /**
-     * Speaks the given text out loud through the LOUDSPEAKER.
+     * Speaks the given text out loud through the selected TTS engine.
      * @param text The text to speak
      * @param onDone Callback when speech playback finishes
      */
@@ -70,6 +74,27 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
             return
         }
 
+        val provider = SecureKeyStore.getTtsProvider(context)
+        if (provider == "gemini") {
+            CoroutineScope(Dispatchers.Main).launch {
+                val success = GeminiTtsClient.speakText(context, text) {
+                    onDone?.invoke()
+                }
+                if (!success) {
+                    Log.w(TAG, "Gemini TTS failed, falling back to Android platform TTS")
+                    speakWithPlatform(text, onDone)
+                }
+            }
+        } else {
+            speakWithPlatform(text, onDone)
+        }
+    }
+
+    /**
+     * Speaks the given text using Android's platform TextToSpeech engine.
+     * Played through the LOUDSPEAKER.
+     */
+    private fun speakWithPlatform(text: String, onDone: (() -> Unit)?) {
         // Force SPEAKER_ON so audio comes from loudspeaker, not earpiece
         forceLoudspeaker(true)
 
@@ -101,6 +126,13 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
 
         // QUEUE_FLUSH interrupts any ongoing speech immediately
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
+    /**
+     * Plays raw base64 encoded PCM audio natively via GeminiTtsClient.
+     */
+    fun playDirectBase64Audio(base64Audio: String) {
+        GeminiTtsClient.playAudioBase64(base64Audio)
     }
 
     /**
@@ -151,6 +183,7 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
      * Stops current speech.
      */
     fun stop() {
+        GeminiTtsClient.stop()
         if (isInitialized) {
             tts?.stop()
             forceLoudspeaker(false)
@@ -161,6 +194,7 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
      * Shuts down the TTS engine.
      */
     fun shutdown() {
+        GeminiTtsClient.stop()
         tts?.stop()
         tts?.shutdown()
         forceLoudspeaker(false)

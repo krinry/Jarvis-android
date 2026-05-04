@@ -154,7 +154,7 @@ object ActionExecutor {
 
             // === New Phase 1 Actions ===
             // Termux
-            "termux_run", "termux_write_file", "termux_read_file" ->
+            "termux_run", "termux_write_file", "termux_read_file", "termux_modify_file" ->
                 TermuxBridge.execute(action, service.applicationContext)
             // Direct Intents (no UI needed)
             "call", "send_sms", "set_alarm", "set_timer", "create_event",
@@ -168,6 +168,8 @@ object ActionExecutor {
             // File Manager
             "list_files", "read_file", "write_file", "delete_file", "share_file" ->
                 FileManagerExecutor.execute(action, service.applicationContext)
+            // AI App Delegation: use ChatGPT/Gemini/DeepSeek for large code gen
+            "delegate_ai" -> AiAppDelegator.execute(action, service.applicationContext)
             // Ask user (handled in AgentLlmEngine, but safe fallback)
             "ask_user" -> "🗣 User se puch raha hoon..."
 

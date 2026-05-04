@@ -57,6 +57,14 @@ class TaskMemory {
     }
 
     /**
+     * Replace the original command (used by Native Audio Dialog when actual transcript is detected later)
+     */
+    fun replaceCommand(command: String) {
+        originalCommand = command
+        Log.d(TAG, "Task command updated to: $command")
+    }
+
+    /**
      * Set the plan steps from AI's first response.
      */
     fun setPlan(steps: List<String>) {

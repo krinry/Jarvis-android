@@ -36,13 +36,13 @@ class WhisperRecorder(private val context: Context) {
      * Start recording from microphone.
      * @param scope CoroutineScope to run in
      * @param onStateChange Called when listening state changes
-     * @param onTranscript Called with transcript result (null on failure)
+     * @param onResult Called with (transcript, audioFile) result
      */
     fun startRecording(
         scope: CoroutineScope,
         onStateChange: (Boolean) -> Unit,
         onStatus: (String) -> Unit,
-        onTranscript: (String?) -> Unit
+        onResult: (String?, File?) -> Unit
     ) {
         isListening = true
         onStateChange(true)
@@ -99,6 +99,15 @@ class WhisperRecorder(private val context: Context) {
                     return@launch
                 }
 
+                val nativeAudioEnabled = SecureKeyStore.isNativeAudioEnabled(context)
+
+                if (nativeAudioEnabled) {
+                    withContext(Dispatchers.Main) {
+                        onResult(null, wavFile)
+                    }
+                    return@launch
+                }
+
                 // Route to selected STT provider
                 val sttProvider = SecureKeyStore.getSttProvider(context)
                 val transcript = if (sttProvider == "gemini") {
@@ -115,7 +124,7 @@ class WhisperRecorder(private val context: Context) {
                 wavFile.delete()
 
                 withContext(Dispatchers.Main) {
-                    onTranscript(transcript)
+                    onResult(transcript, null)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Whisper recording failed", e)
