@@ -1,6 +1,7 @@
 *.iml
 .gradle
-/local.properties
+/local.
+.idea/
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -19,3 +20,4 @@ keystore.properties
 /docs
 *.log
 *.txt
+/.idea
