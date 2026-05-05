@@ -67,28 +67,26 @@ fun ChatMessageItem(message: ChatMessage, onAttachmentClick: (Attachment) -> Uni
     val isError = message.isError
     var showThinking by remember { mutableStateOf(false) }
 
-    // 🔥 FIX: Live Streaming & Think Parser
+    // 🔥 FIX: Live Streaming & Think Parser (proper multi-line search)
     val parsedData = remember(message.content, isUser) {
         val raw = message.content
         if (isUser) return@remember Pair(null, raw)
 
         val thinkStart = raw.indexOf("<think>")
-        val thinkEnd = raw.indexOf("</think>")
+        if (thinkStart == -1) {
+            return@remember Pair(null, raw)
+        }
 
-        if (thinkStart != -1) {
-            if (thinkEnd != -1) {
-                // Closed thinking block
-                val thinkingText = raw.substring(thinkStart + 7, thinkEnd).trim()
-                val cleanText = (raw.substring(0, thinkStart) + raw.substring(thinkEnd + 8)).trim()
-                Pair(thinkingText, cleanText)
-            } else {
-                // Live Streaming state (abhi </think> nahi aaya)
-                val thinkingText = raw.substring(thinkStart + 7).trim()
-                val cleanText = raw.substring(0, thinkStart).trim()
-                Pair(thinkingText, cleanText)
-            }
+        // Search for closing tag AFTER the opening tag position
+        val thinkEnd = raw.indexOf("</think>", thinkStart)
+        if (thinkEnd != -1) {
+            val thinkingText = raw.substring(thinkStart + 7, thinkEnd).trim()
+            val cleanText = raw.substring(0, thinkStart).trim() + "\n" + raw.substring(thinkEnd + 8).trim()
+            Pair(thinkingText, cleanText.trim())
         } else {
-            Pair(null, raw)
+            val thinkingText = raw.substring(thinkStart + 7).trim()
+            val cleanText = raw.substring(0, thinkStart).trim()
+            Pair(thinkingText, cleanText)
         }
     }
 

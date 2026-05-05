@@ -187,7 +187,7 @@ object GroqApiClient {
             put("model", model)
             put("messages", messagesArray)
             put("temperature", 0.7)
-            put("max_tokens", 300)
+            put("max_tokens", 4096)
         }
 
         val requestBuilder = Request.Builder()

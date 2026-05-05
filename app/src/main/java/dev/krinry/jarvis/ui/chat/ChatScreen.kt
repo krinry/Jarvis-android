@@ -232,15 +232,11 @@ fun ChatScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = 16.dp,
-                        bottom = 16.dp,
+                        bottom = 80.dp,
                         start = 16.dp,
                         end = 16.dp
                     )
                 ) {
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
                     items(messages, key = { it.id }) { msg ->
                         ChatMessageItem(message = msg)
                     }
@@ -248,9 +244,6 @@ fun ChatScreen(
                         item {
                             LoadingBubble()
                         }
-                    }
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
