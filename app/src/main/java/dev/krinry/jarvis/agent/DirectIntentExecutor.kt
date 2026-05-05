@@ -10,7 +10,6 @@ import android.os.Build
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.telephony.SmsManager
-import android.util.Log
 
 /**
  * DirectIntentExecutor — Fire Android Intents directly, skipping UI.

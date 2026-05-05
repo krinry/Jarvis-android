@@ -1,7 +1,6 @@
 package dev.krinry.jarvis.ui.chat
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.krinry.jarvis.ai.GroqApiClient
@@ -10,10 +9,12 @@ import dev.krinry.jarvis.data.chat.ChatDao
 import dev.krinry.jarvis.data.chat.ChatDatabase
 import dev.krinry.jarvis.data.chat.ChatMessage
 import dev.krinry.jarvis.security.SecureKeyStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 

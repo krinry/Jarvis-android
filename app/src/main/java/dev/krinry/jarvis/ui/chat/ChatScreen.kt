@@ -4,17 +4,12 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,8 +17,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -31,26 +24,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.data.chat.Attachment
-import dev.krinry.jarvis.data.chat.ChatMessage
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.ui.settings.startBubbleService
 import dev.krinry.jarvis.ui.settings.stopBubbleService
 import dev.krinry.jarvis.ui.theme.*
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,10 +55,6 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
-
-    // Keyboard visibility
-    val imeInsets = WindowInsets.ime
-    val isKeyboardVisible = imeInsets.asPaddingValues().calculateBottomPadding() > 0.dp
 
     var inputText by remember { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf(listOf<Attachment>()) }
@@ -187,55 +171,53 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            Column(
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+    ) {
+        if (pendingAttachments.isNotEmpty()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .padding(bottom = if (isKeyboardVisible) 8.dp else 20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Pending attachments
-                if (pendingAttachments.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        pendingAttachments.forEachIndexed { idx, att ->
-                            AttachmentChip(att) {
-                                pendingAttachments = pendingAttachments.toMutableList().apply { removeAt(idx) }
-                            }
-                        }
+                pendingAttachments.forEachIndexed { idx, att ->
+                    AttachmentChip(att) {
+                        pendingAttachments = pendingAttachments.toMutableList().apply { removeAt(idx) }
                     }
                 }
-
-                // Modern Chat Input - full width with rounded-3xl design
-                ChatInputWithChips(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    onSubmit = {
-                        if (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) {
-                            viewModel.sendMessage(inputText, pendingAttachments)
-                            inputText = ""
-                            pendingAttachments = emptyList()
-                            keyboardController?.hide()
-                        }
-                    },
-                    isLoading = isLoading,
-                    placeholder = "Ask anything",
-                    enabled = true,
-                    onMicClick = { startVoiceInput() },
-                    onAttachClick = { showAttachSheet = true },
-                    selectedModel = selectedModel,
-                    onModelChange = { model ->
-                        selectedModel = model
-                        viewModel.setModel(model)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 8.dp)
-                )
             }
-        },
+        }
+
+        ScreenshotStyleChatInput(
+            value = inputText,
+            onValueChange = { inputText = it },
+            onSubmit = {
+                if (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) {
+                    viewModel.sendMessage(inputText, pendingAttachments)
+                    inputText = ""
+                    pendingAttachments = emptyList()
+                    keyboardController?.hide()
+                }
+            },
+            isLoading = isLoading,
+            placeholder = "Ask anything",
+            enabled = true,
+            onMicClick = { startVoiceInput() },
+            onAttachClick = { showAttachSheet = true },
+            selectedModel = selectedModel,
+            onModelChange = { model ->
+                selectedModel = model
+                viewModel.setModel(model)
+            },
+            // YAHAN BHI FIX HAI: top/bottom padding hata di hai taaki box bottom edge ko touch kare
+            modifier = Modifier.fillMaxWidth() 
+        )
+    }
+},
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(
@@ -250,14 +232,14 @@ fun ChatScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = 32.dp,
-                        bottom = if (isKeyboardVisible) 16.dp else 100.dp,
+                        top = 16.dp,
+                        bottom = 16.dp,
                         start = 16.dp,
                         end = 16.dp
                     )
                 ) {
                     item {
-                        Spacer(modifier = Modifier.height(if (isKeyboardVisible) 8.dp else 16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                     items(messages, key = { it.id }) { msg ->
                         ChatMessageItem(message = msg)

@@ -1,7 +1,6 @@
 package dev.krinry.jarvis
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -34,7 +33,6 @@ import androidx.compose.ui.unit.sp
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.ui.theme.*
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
