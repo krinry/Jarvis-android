@@ -30,6 +30,7 @@ object SecureKeyStore {
     private const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
     private const val KEY_NATIVE_AUDIO_DIALOG_ENABLED = "native_audio_dialog_enabled"
     private const val KEY_DARK_MODE = "dark_mode_enabled"
+    private const val KEY_TOOL_CALLING_ENABLED = "tool_calling_enabled"
 
     private fun getEncryptedPrefs(context: Context) = try {
         val masterKey = MasterKey.Builder(context)
@@ -244,5 +245,17 @@ object SecureKeyStore {
 
     fun isDarkMode(context: Context): Boolean {
         return getEncryptedPrefs(context).getBoolean(KEY_DARK_MODE, true)
+    }
+
+    // =========================================================================
+    // === Native Tool Calling (Function Calling) ===
+    // =========================================================================
+
+    fun setToolCallingEnabled(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_TOOL_CALLING_ENABLED, enabled).apply()
+    }
+
+    fun isToolCallingEnabled(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_TOOL_CALLING_ENABLED, false)
     }
 }

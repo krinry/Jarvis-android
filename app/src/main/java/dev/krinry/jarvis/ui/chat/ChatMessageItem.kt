@@ -65,6 +65,31 @@ import java.util.Locale
 fun ChatMessageItem(message: ChatMessage, onAttachmentClick: (Attachment) -> Unit = {}) {
     val isUser = message.role == "user"
     val isError = message.isError
+
+    // ── Tool Call Message Detection ──
+    // Messages from the tool-calling system use a special format:
+    //   [TOOL_CALL]name|status|args|result
+    if (!isUser && message.content.startsWith("[TOOL_CALL]")) {
+        val parsed = parseToolCallMessage(message.content)
+        if (parsed != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 24.dp, top = 2.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                ToolCallBubble(
+                    toolName = parsed.name,
+                    arguments = parsed.arguments,
+                    result = parsed.result,
+                    status = parsed.status,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            return
+        }
+    }
+
     var showThinking by remember { mutableStateOf(false) }
 
     // 🔥 FIX: Live Streaming & Think Parser (proper multi-line search)
@@ -302,4 +327,42 @@ private fun AttachmentPreview(attachment: Attachment, modifier: Modifier = Modif
 private fun formatTime(timestamp: Long): String {
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
     return sdf.format(Date(timestamp))
+}
+
+// =========================================================================
+// Tool Call Message Parser
+// =========================================================================
+
+/**
+ * Parsed tool call data extracted from a [TOOL_CALL] message.
+ */
+private data class ParsedToolCall(
+    val name: String,
+    val status: ToolCallStatus,
+    val arguments: String,
+    val result: String?
+)
+
+/**
+ * Parse a [TOOL_CALL] message into structured data.
+ * Format: [TOOL_CALL]name|status_code|args_json|result_text
+ *
+ * Status codes: R=running, S=success, F=failed, D=denied
+ */
+private fun parseToolCallMessage(content: String): ParsedToolCall? {
+    val body = content.removePrefix("[TOOL_CALL]")
+    val parts = body.split("|", limit = 4)
+    if (parts.size < 2) return null
+
+    val name = parts[0]
+    val status = when (parts.getOrNull(1) ?: "R") {
+        "S" -> ToolCallStatus.SUCCESS
+        "F" -> ToolCallStatus.FAILED
+        "D" -> ToolCallStatus.DENIED
+        else -> ToolCallStatus.RUNNING
+    }
+    val arguments = parts.getOrNull(2) ?: ""
+    val result = parts.getOrNull(3)
+
+    return ParsedToolCall(name, status, arguments, result)
 }

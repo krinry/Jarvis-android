@@ -112,6 +112,21 @@ object ActionExecutor {
     }
 
     /**
+     * Execute action directly from JSON string.
+     * Used when user approves a pending action from ViewModel.
+     */
+    fun executeFromJson(json: String): String {
+        val action = parseResponse(json) ?: return "❌ JSON parsing failed: $json"
+        val nodes = try {
+            val root = AutoAgentService.instance?.getRootNode()
+            if (root != null) UiTreeExtractor.extractTree(root) else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        return execute(action, nodes)
+    }
+
+    /**
      * Execute an action. Returns Hindi status string.
      */
     fun execute(action: AgentAction, nodes: List<UiTreeExtractor.UiNode>): String {
@@ -168,6 +183,15 @@ object ActionExecutor {
             // File Manager
             "list_files", "read_file", "write_file", "delete_file", "share_file" ->
                 FileManagerExecutor.execute(action, service.applicationContext)
+            // Native File Operations (Phase 1 - with permissions check)
+            "create_dir", "delete_path", "move_file" ->
+                NativeFileExecutor.executeSync(
+                    action.action,
+                    action.path,
+                    action.body,
+                    action.command, // newPath for move_file
+                    service.applicationContext
+                )
             // AI App Delegation: use ChatGPT/Gemini/DeepSeek for large code gen
             "delegate_ai" -> AiAppDelegator.execute(action, service.applicationContext)
             // Ask user (handled in AgentLlmEngine, but safe fallback)

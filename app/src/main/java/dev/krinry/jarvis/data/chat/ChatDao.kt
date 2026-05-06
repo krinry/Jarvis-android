@@ -23,6 +23,9 @@ interface ChatDao {
     @Insert
     suspend fun insertMessage(msg: ChatMessage): Long
 
+    @Query("UPDATE chat_messages SET content = :newContent WHERE id = :id")
+    suspend fun updateMessage(id: Long, newContent: String)
+
     @Query("DELETE FROM chat_messages WHERE id = :id")
     suspend fun deleteMessage(id: Long)
 
@@ -34,4 +37,7 @@ interface ChatDao {
 
     @Query("SELECT * FROM chat_messages WHERE role = 'user' ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastUserMessage(): ChatMessage?
+
+    @Query("UPDATE chat_messages SET content = :newContent WHERE id = :id")
+    suspend fun updateMessageContent(id: Long, newContent: String)
 }

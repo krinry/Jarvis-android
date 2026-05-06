@@ -52,6 +52,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val pendingAction by viewModel.pendingAction.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -190,6 +191,18 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+
+        // 🔒 Permission Authorization Box
+        if (pendingAction != null) {
+            PermissionAuthorizationBox(
+                actionType = pendingAction!!.actionType,
+                target = pendingAction!!.target,
+                details = pendingAction!!.details,
+                onAllow = { viewModel.handleActionPermission(true) },
+                onDeny = { viewModel.handleActionPermission(false) },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            )
         }
 
         ScreenshotStyleChatInput(
