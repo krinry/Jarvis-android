@@ -14,8 +14,8 @@ class OpenRouterProvider : LlmProvider {
     override val id = "openrouter"
     override val displayName = "OpenRouter"
     override val baseUrl = "https://openrouter.ai/api/v1"
-    override val defaultModel = "google/gemini-2.0-flash-exp:free"
-    override val defaultFallbackModel = "meta-llama/llama-3.3-70b-instruct:free"
+    override val defaultModel = "meta-llama/llama-3.1-70b-instruct"
+    override val defaultFallbackModel = "google/gemini-2.0-flash-001"
 
     override fun extraHeaders(): Map<String, String> = mapOf(
         "HTTP-Referer" to "https://jarvis.krinry.dev",

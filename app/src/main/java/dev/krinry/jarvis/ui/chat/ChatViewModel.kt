@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.agent.ActionExecutor
 import dev.krinry.jarvis.agent.AgentType
+import dev.krinry.jarvis.agent.RouterAgent
 import dev.krinry.jarvis.agent.ToolCallingEngine
 import dev.krinry.jarvis.data.chat.Attachment
 import dev.krinry.jarvis.data.chat.ChatDao
@@ -203,10 +204,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Simple keyword-based agent detection for chat mode.
-     * The full RouterAgent is used in the AgentLlmEngine service path.
+     * Determine which agent should handle the command.
+     * Uses RouterAgent (LLM) for high accuracy, with a keyword fallback.
      */
-    private fun detectAgentType(command: String): AgentType {
+    private suspend fun detectAgentType(command: String): AgentType {
+        // 1. Try LLM-based routing first (high accuracy)
+        try {
+            return RouterAgent.determineRoute(command, context)
+        } catch (e: Exception) {
+            Log.e(TAG, "RouterAgent failed, falling back to keywords", e)
+        }
+
+        // 2. Fallback to simple keywords if LLM router fails
         val lower = command.lowercase()
         return when {
             // Coder keywords
@@ -216,10 +225,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             lower.contains("run") || lower.contains("git") || lower.contains("build") ||
             lower.contains("tool") || lower.contains("function") -> AgentType.CODER_AGENT
 
-            // UI keywords
+            // UI / Phone control keywords
             lower.contains("click") || lower.contains("open") || lower.contains("app") ||
             lower.contains("screen") || lower.contains("tap") || lower.contains("swipe") ||
-            lower.contains("whatsapp") || lower.contains("settings") -> AgentType.UI_AGENT
+            lower.contains("whatsapp") || lower.contains("settings") || lower.contains("call") ||
+            lower.contains("sms") || lower.contains("message") || lower.contains("contact") -> AgentType.UI_AGENT
 
             // Default to general
             else -> AgentType.GENERAL_CHAT

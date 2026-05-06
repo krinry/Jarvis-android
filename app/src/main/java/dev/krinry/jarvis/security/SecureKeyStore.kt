@@ -256,6 +256,6 @@ object SecureKeyStore {
     }
 
     fun isToolCallingEnabled(context: Context): Boolean {
-        return getEncryptedPrefs(context).getBoolean(KEY_TOOL_CALLING_ENABLED, false)
+        return getEncryptedPrefs(context).getBoolean(KEY_TOOL_CALLING_ENABLED, true)
     }
 }

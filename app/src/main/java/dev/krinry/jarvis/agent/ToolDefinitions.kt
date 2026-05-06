@@ -47,7 +47,9 @@ object ToolDefinitions {
                 put("parameters", JSONObject().apply {
                     put("type", "object")
                     put("properties", properties)
-                    put("required", required)
+                    if (required.length() > 0) {
+                        put("required", required)
+                    }
                 })
             })
         }
@@ -360,10 +362,14 @@ object ToolDefinitions {
     }
 
     /**
-     * Get tools for GENERAL_CHAT — minimal set, just ask_user + task_complete.
+     * Get tools for GENERAL_CHAT — expanded set for common assistant tasks.
      */
     fun getGeneralTools(): JSONArray {
-        val generalActions = setOf("ask_user", "task_complete", "search_web")
+        val generalActions = setOf(
+            "ask_user", "task_complete", "search_web", 
+            "call", "send_sms", "open_app", "navigate", 
+            "set_alarm", "set_timer", "flashlight", "set_volume"
+        )
         val all = getAllTools()
         val filtered = JSONArray()
         for (i in 0 until all.length()) {

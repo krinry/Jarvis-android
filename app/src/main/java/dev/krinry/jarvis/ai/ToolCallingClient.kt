@@ -87,25 +87,43 @@ object ToolCallingClient {
             val provider = GroqApiClient.getActiveProvider(context)
             val apiKey = provider.getApiKey(context)
                 ?: return@withContext LlmResult.Error("No API key for ${provider.displayName}")
-            val model = SecureKeyStore.getPrimaryModel(context).ifEmpty { provider.defaultModel }
+            
+            var model = SecureKeyStore.getPrimaryModel(context).ifEmpty { provider.defaultModel }
+            
+            // 🛡️ Groq specific: Some models (like llama3-8b) don't support tools.
+            // If tools are provided, force a tool-capable model on Groq.
+            if (provider.id == "groq" && tools.length() > 0) {
+                val nonToolModels = listOf("llama3-8b-8192", "llama-3.1-8b-instant", "llama3-70b-8192")
+                if (model in nonToolModels || model.contains("8b")) {
+                    Log.w(TAG, "Model $model doesn't support tools on Groq. Falling back to llama-3.3-70b-versatile.")
+                    model = "llama-3.3-70b-versatile"
+                }
+            }
 
             val payload = JSONObject().apply {
                 put("model", model)
                 put("messages", messages)
-                put("tools", tools)
-                put("tool_choice", "auto")
+                
+                // ⚠️ Only include tools if they exist to avoid 400 errors on some models/providers
+                if (tools.length() > 0) {
+                    put("tools", tools)
+                    // "auto" is standard, but we'll ensure parallel calls are disabled to keep it simple for Groq
+                    put("tool_choice", "auto")
+                    put("parallel_tool_calls", false) 
+                }
+                
                 put("temperature", temperature)
                 put("max_tokens", maxTokens)
             }
 
-            Log.d(TAG, "Tool call request: model=$model, provider=${provider.displayName}, " +
-                    "messages=${messages.length()}, tools=${tools.length()}")
+            val jsonPayload = payload.toString()
+            Log.d(TAG, "Tool calling payload: $jsonPayload")
 
             val requestBuilder = Request.Builder()
                 .url("${provider.baseUrl}/chat/completions")
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
 
             provider.extraHeaders().forEach { (key, value) ->
                 requestBuilder.addHeader(key, value)
@@ -119,14 +137,16 @@ object ToolCallingClient {
                 return@withContext LlmResult.Error("Rate limited. Retry after ${retryAfter}s")
             }
 
+            val body = response.body?.string()
             if (!response.isSuccessful) {
-                val errBody = response.body?.string()?.take(200) ?: ""
+                val errBody = body?.take(500) ?: ""
                 Log.e(TAG, "API error ${response.code}: $errBody")
                 return@withContext LlmResult.Error("Server error ${response.code}: $errBody")
             }
 
-            val body = response.body?.string()
-                ?: return@withContext LlmResult.Error("Empty response body")
+            if (body.isNullOrBlank()) {
+                return@withContext LlmResult.Error("Empty response body")
+            }
 
             parseResponse(body)
         } catch (e: Exception) {
@@ -158,10 +178,17 @@ object ToolCallingClient {
                 for (i in 0 until toolCallsArray.length()) {
                     val tc = toolCallsArray.getJSONObject(i)
                     val function = tc.getJSONObject("function")
+                    val argsObj = function.opt("arguments")
+                    val argsString = when (argsObj) {
+                        is JSONObject -> argsObj.toString()
+                        is String -> argsObj
+                        else -> "{}"
+                    }
+
                     toolCalls.add(ToolCall(
                         id = tc.optString("id", "call_$i"),
                         functionName = function.getString("name"),
-                        arguments = function.optString("arguments", "{}")
+                        arguments = argsString
                     ))
                 }
 

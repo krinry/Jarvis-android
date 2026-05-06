@@ -14,8 +14,8 @@ class GroqProvider : LlmProvider {
     override val id = "groq"
     override val displayName = "Groq"
     override val baseUrl = "https://api.groq.com/openai/v1"
-    override val defaultModel = "moonshotai/kimi-k2-instruct-0905"
-    override val defaultFallbackModel = "openai/gpt-oss-120b"
+    override val defaultModel = "llama-3.3-70b-versatile"
+    override val defaultFallbackModel = "mixtral-8x7b-32768"
     override val supportsSTT = true
 
     private val client = OkHttpClient.Builder()
