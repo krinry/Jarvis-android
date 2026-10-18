@@ -118,6 +118,8 @@ class AudioTrackPlayer(private val context: Context) {
         audioQueue.offer(pcmData)
     }
 
+    fun isCurrentlyPlaying(): Boolean = isPlaying.get() || !audioQueue.isEmpty()
+
     /**
      * Barge-in / Interruption: Stops playback and immediately purges pending audio.
      */

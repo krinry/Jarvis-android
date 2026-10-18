@@ -114,13 +114,31 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
                     AudioFormat.ENCODING_PCM_16BIT
                 )
 
-                audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    MIC_SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBuffer * 4
-                )
+                // Try VOICE_RECOGNITION for hardware echo cancellation & noise suppression
+                var record: AudioRecord? = null
+                try {
+                    record = AudioRecord(
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        MIC_SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        minBuffer * 4
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "VOICE_RECOGNITION audio source failed, falling back to MIC", e)
+                }
+
+                if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
+                    record = AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        MIC_SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        minBuffer * 4
+                    )
+                }
+
+                audioRecord = record
 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                     Log.e(TAG, "AudioRecord initialization failed")
@@ -132,17 +150,69 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
                 }
 
                 audioRecord?.startRecording()
-                Log.d(TAG, "Mic recording started (16kHz PCM)")
+                Log.d(TAG, "Mic recording started (16kHz PCM, source=${audioRecord?.audioSource})")
                 withContext(Dispatchers.Main) {
-                    onStatusUpdate?.invoke("🎤 Sun raha hoon...")
+                    onStatusUpdate?.invoke("🎤 Sun raha hoon... Boliye")
                 }
 
-                val buffer = ByteArray(CHUNK_FRAMES * 2) // 16-bit = 2 bytes per sample
+                val buffer = ByteArray(CHUNK_FRAMES * 2) // 16-bit = 2 bytes per sample (3200 bytes per 100ms)
+                var isUserSpeaking = false
+                var silenceFramesCount = 0
+                val silenceFramesThreshold = 8 // 8 * 100ms = 800ms silence
+
                 while (isRecordingMic.get() && isSessionActive.get() && isActive) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (read > 0) {
                         val chunk = if (read == buffer.size) buffer else buffer.copyOf(read)
+
+                        // Calculate RMS energy for Hybrid VAD
+                        var sumSquares = 0.0
+                        val sampleCount = read / 2
+                        for (i in 0 until sampleCount) {
+                            val lo = chunk[i * 2].toInt() and 0xFF
+                            val hi = chunk[i * 2 + 1].toInt() shl 8
+                            val sample = (lo or hi).toShort()
+                            sumSquares += sample * sample
+                        }
+                        val rms = if (sampleCount > 0) Math.sqrt(sumSquares / sampleCount) else 0.0
+
+                        // Acoustic Echo Protection:
+                        // While Gemini is speaking via the phone's loudspeaker, do NOT send
+                        // the speaker output back into Gemini as user speech, which causes
+                        // self-interruption (Gemini thinking user interrupted).
+                        val isGeminiSpeaking = audioPlayer?.isCurrentlyPlaying() == true
+                        if (isGeminiSpeaking) {
+                            // User can barge in by speaking loudly over the assistant
+                            if (rms > 2800.0) {
+                                Log.d(TAG, "Intentional user barge-in detected (RMS=${rms.toInt()})")
+                                audioPlayer?.stopAndClear()
+                                liveClient?.sendRealtimeAudio(chunk)
+                                isUserSpeaking = true
+                                silenceFramesCount = 0
+                            }
+                            continue
+                        }
+
                         liveClient?.sendRealtimeAudio(chunk)
+
+                        if (rms > 600.0) {
+                            if (!isUserSpeaking) {
+                                isUserSpeaking = true
+                                Log.d(TAG, "Speech detected (RMS=${rms.toInt()})")
+                            }
+                            silenceFramesCount = 0
+                        } else if (isUserSpeaking) {
+                            silenceFramesCount++
+                            if (silenceFramesCount >= silenceFramesThreshold) {
+                                Log.d(TAG, "Silence after speech (800ms) -> sending audioStreamEnd (Hybrid VAD)")
+                                liveClient?.sendAudioStreamEnd()
+                                isUserSpeaking = false
+                                silenceFramesCount = 0
+                            }
+                        }
+                    } else if (read < 0) {
+                        Log.e(TAG, "AudioRecord read error: $read")
+                        delay(20)
                     }
                 }
             } catch (e: Exception) {
@@ -209,16 +279,19 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
     override fun onAudioDataReceived(pcmData: ByteArray) {
         // Native Gemini TTS audio play karo (loudspeaker via AudioTrack)
+        Log.d(TAG, "Audio data chunk received from Gemini: ${pcmData.size} bytes")
         audioPlayer?.enqueueChunk(pcmData)
     }
 
     override fun onInputTranscript(text: String) {
+        Log.d(TAG, "User Input STT: $text")
         engineScope.launch {
             onStatusUpdate?.invoke("🗣️ \"$text\"")
         }
     }
 
     override fun onOutputTranscript(text: String) {
+        Log.d(TAG, "Gemini Output TTS: $text")
         engineScope.launch {
             onStatusUpdate?.invoke("⚡ $text")
         }

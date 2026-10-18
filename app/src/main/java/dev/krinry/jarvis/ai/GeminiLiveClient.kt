@@ -3,6 +3,7 @@ package dev.krinry.jarvis.ai
 import android.util.Base64
 import android.util.Log
 import okhttp3.*
+import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -93,6 +94,13 @@ RULES:
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                Log.d(TAG, "onMessage (text, ${text.length} chars)")
+                handleServerMessage(text)
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                val text = bytes.utf8()
+                Log.d(TAG, "onMessage (binary, ${bytes.size} bytes)")
                 handleServerMessage(text)
             }
 
@@ -167,11 +175,16 @@ RULES:
         }
     }
 
+    private var sentAudioChunkCount = 0
+
     /**
      * Streams raw PCM audio chunk (16kHz 16-bit little-endian) from microphone.
      */
     fun sendRealtimeAudio(pcmChunk: ByteArray) {
-        if (!isReady()) return
+        if (!isReady()) {
+            Log.w(TAG, "sendRealtimeAudio dropped: isConnected=${isConnected.get()} isSetupDone=${isSetupDone.get()}")
+            return
+        }
         try {
             val base64 = Base64.encodeToString(pcmChunk, Base64.NO_WRAP)
             val payload = JSONObject().apply {
@@ -183,6 +196,10 @@ RULES:
                 })
             }
             webSocket?.send(payload.toString())
+            sentAudioChunkCount++
+            if (sentAudioChunkCount % 30 == 1) {
+                Log.d(TAG, "Streaming audio to Gemini Live (chunk #$sentAudioChunkCount)")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error sending realtime audio", e)
         }
@@ -254,9 +271,7 @@ RULES:
             val functionResponse = JSONObject().apply {
                 put("id", callId)
                 put("name", functionName)
-                put("response", JSONObject().apply {
-                    put("output", responseData)
-                })
+                put("response", responseData)
             }
 
             val payload = JSONObject().apply {
