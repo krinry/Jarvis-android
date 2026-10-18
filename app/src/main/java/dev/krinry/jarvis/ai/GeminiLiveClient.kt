@@ -54,7 +54,14 @@ CRITICAL INTERACTION RULES:
 - Step 3: When the workflow completes, announce completion and call task_done(summary).
 - Step 4: After task_done, DO NOT CLOSE OR TERMINATE. Remain active and ask if Sir requires further assistance.
 
-3. CLOSING:
+3. VISUAL & CAMERA PERCEPTION (EYES OF JARVIS):
+- When the user asks about what is on their screen, call analyze_current_screen(question).
+- When the user asks you to look at something in front of them or in the real world ("Jarvis look at this", "ye dekho", "samne kya hai", "read this paper", "identify this", etc.):
+  - Speak a crisp 1-sentence acknowledgment (e.g. "Opening optic sensors, Sir", "Samne dekh raha hoon, Sir").
+  - Call inspect_real_world(camera, question). The captured high-res optic frame will be instantly injected into your video vision stream.
+  - Analyze the frame and directly explain what you see to Sir with scientific accuracy and butler elegance.
+
+4. CLOSING:
 - Only if the user explicitly commands you to shut down or sleep ("Jarvis shut down", "band ho jao", "goodbye"), give a crisp farewell ("Powering down systems, Sir") and call close_assistant()."""
     }
 
@@ -905,6 +912,26 @@ CRITICAL INTERACTION RULES:
                     put("question", JSONObject().apply {
                         put("type", "STRING")
                         put("description", "Specific user query or focus regarding the current screen")
+                    })
+                })
+            })
+        })
+
+        // 29. inspect_real_world
+        fns.put(JSONObject().apply {
+            put("name", "inspect_real_world")
+            put("description", "Inspect the physical real world through the device camera to identify objects, read physical documents, solve problems, or describe surroundings to Sir.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("camera", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Camera lens: 'back' (default rear optic) or 'front' (user-facing selfie optic)")
+                    })
+                    put("question", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Specific question, inquiry or task about what to examine in the physical world")
                     })
                 })
             })

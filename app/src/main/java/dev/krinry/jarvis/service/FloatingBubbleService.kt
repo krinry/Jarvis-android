@@ -40,6 +40,8 @@ import dev.krinry.jarvis.R
 import dev.krinry.jarvis.agent.AgentLlmEngine
 import dev.krinry.jarvis.agent.GeminiLiveEngine
 import dev.krinry.jarvis.ai.GroqApiClient
+import dev.krinry.jarvis.audio.SoundEffectsManager
+import dev.krinry.jarvis.audio.WakeWordDetector
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.ui.ArcReactorView
 import kotlinx.coroutines.*
@@ -91,6 +93,7 @@ class FloatingBubbleService : Service() {
     private var subtitleView: View? = null
     private var agentEngine: AgentLlmEngine? = null
     private var geminiLiveEngine: GeminiLiveEngine? = null
+    private var wakeWordDetector: WakeWordDetector? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var isListening = false
@@ -115,6 +118,8 @@ class FloatingBubbleService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        SoundEffectsManager.init(applicationContext)
+
         agentEngine = AgentLlmEngine(applicationContext)
         agentEngine?.onStatusUpdate = { status ->
             scope.launch(Dispatchers.Main) {
@@ -124,10 +129,12 @@ class FloatingBubbleService : Service() {
                     stopThinkingAnimation()
                     playCompletionSound()
                     vibratePattern(longArrayOf(0, 80, 60, 80)) // success pattern
+                    wakeWordDetector?.resume()
                 } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
                     isProcessingCommand = false
                     stopThinkingAnimation()
                     vibrateShort()
+                    wakeWordDetector?.resume()
                 }
             }
         }
@@ -175,8 +182,36 @@ class FloatingBubbleService : Service() {
                     arcReactorView?.setState(ArcReactorView.State.IDLE)
                     animateBubble(false)
                     stopThinkingAnimation()
+                    wakeWordDetector?.resume()
                 }
             }
+        }
+
+        // Initialize background Hands-Free Wake Word detector ("Hey Jarvis")
+        wakeWordDetector = WakeWordDetector(applicationContext) { matchedKeyword ->
+            scope.launch(Dispatchers.Main) {
+                Log.d(TAG, "⚡ Wake word detected: $matchedKeyword")
+                SoundEffectsManager.playWakeSound()
+                vibratePattern(longArrayOf(0, 80, 50, 80))
+                addSubtitle("⚡ Wake word: \"$matchedKeyword\"")
+
+                val mode = SecureKeyStore.getEngineMode(applicationContext)
+                if (mode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
+                    if (geminiLiveEngine?.isRunning() != true) {
+                        wakeWordDetector?.pause()
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                        animateBubble(true)
+                        geminiLiveEngine?.startSession()
+                    }
+                } else {
+                    if (!isListening && !isProcessingCommand) {
+                        wakeWordDetector?.pause()
+                        startWhisperRecording()
+                    }
+                }
+            }
+        }.apply {
+            start()
         }
 
         isRunning = true
@@ -193,6 +228,9 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        wakeWordDetector?.stop()
+        wakeWordDetector = null
+        SoundEffectsManager.release()
         scope.cancel()
         geminiLiveEngine?.stopSession()
         geminiLiveEngine = null
@@ -524,7 +562,10 @@ class FloatingBubbleService : Service() {
                 stopThinkingAnimation()
                 animateBubble(false)
                 vibrateShort()
+                wakeWordDetector?.resume()
             } else {
+                wakeWordDetector?.pause()
+                SoundEffectsManager.playWakeSound()
                 vibrateShort()
                 arcReactorView?.setState(ArcReactorView.State.LISTENING)
                 animateBubble(true)
@@ -541,10 +582,16 @@ class FloatingBubbleService : Service() {
             stopThinkingAnimation()
             addSubtitle("⏹ Cancelled")
             vibrateShort()
+            wakeWordDetector?.resume()
             return
         }
-        if (isListening) stopRecordingAndProcess()
-        else startWhisperRecording()
+        if (isListening) {
+            stopRecordingAndProcess()
+        } else {
+            wakeWordDetector?.pause()
+            SoundEffectsManager.playWakeSound()
+            startWhisperRecording()
+        }
     }
 
     private fun onDoubleTap() {
@@ -592,10 +639,7 @@ class FloatingBubbleService : Service() {
 
     private fun playCompletionSound() {
         try {
-            // Use system notification sound as completion tone
-            val mp = MediaPlayer.create(this, android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
-            mp?.setOnCompletionListener { it.release() }
-            mp?.start()
+            SoundEffectsManager.playCompleteSound()
         } catch (_: Exception) {}
     }
 
