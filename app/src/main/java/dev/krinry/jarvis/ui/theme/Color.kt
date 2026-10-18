@@ -2,24 +2,35 @@ package dev.krinry.jarvis.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// === Jarvis Brand Colors ===
-val JarvisPrimary = Color(0xFF6C5CE7)       // Purple accent
-val JarvisSecondary = Color(0xFF00D2D3)     // Cyan accent
-val JarvisAccent = Color(0xFFA29BFE)        // Light purple
-val JarvisSuccess = Color(0xFF00B894)       // Green
-val JarvisWarning = Color(0xFFFECA57)       // Yellow
-val JarvisError = Color(0xFFFF6B6B)         // Red
-val JarvisOrange = Color(0xFFF97316)        // Orange
+// === Stark Industries / Iron Man Brand Colors ===
+val StarkCyan = Color(0xFF00F0FF)           // Arc Reactor Core Cyan
+val StarkCyanGlow = Color(0xFF38E5FF)       // Plasma Blue Glow
+val StarkCyanDim = Color(0x3300F0FF)        // 20% Cyan hairline / glow
+val StarkGold = Color(0xFFFFB703)           // Mark Armor Gold Accent
+val StarkGoldGlow = Color(0xFFFFD166)       // Overdrive Gold
+val StarkRed = Color(0xFFEF233C)            // Admin / Weapon / Alert Red
+val StarkGreen = Color(0xFF06D6A0)          // Systems Nominal Green
+val StarkBlueDark = Color(0xFF0A111E)       // Deep Tech Blue
 
-// Dark theme
-val DarkBackground = Color(0xFF0A0A1A)
-val DarkSurface = Color(0xFF141428)
-val DarkSurfaceVariant = Color(0xFF1E1E3A)
-val DarkCard = Color(0xFF1A1A35)
-val DarkOnSurface = Color(0xFFE8E8F0)
-val DarkOnSurfaceVariant = Color(0xFFA0A0C0)
+// Primary & Secondary Brand Tokens (Replaces generic purple with Stark Cyan & Gold)
+val JarvisPrimary = StarkCyan               // Arc Reactor Cyan
+val JarvisSecondary = StarkGold             // Mark Gold
+val JarvisAccent = StarkCyanGlow            // Plasma Glow
+val JarvisSuccess = StarkGreen              // Protocols Nominal
+val JarvisWarning = StarkGold               // Amber Overdrive
+val JarvisError = StarkRed                  // Lockdown Red
+val JarvisOrange = Color(0xFFFB8500)        // Thruster Orange
 
-// Legacy / fallback
+// Stark Obsidian HUD Dark Theme (Cinematic Sci-Fi, Zero AI Slop)
+val DarkBackground = Color(0xFF040811)      // Deep Cosmic Obsidian Void
+val DarkSurface = Color(0xFF08101E)         // Stark Glass Surface
+val DarkSurfaceVariant = Color(0xFF0F1B2F)  // Secondary Chamber
+val DarkCard = Color(0xFF0A1324)            // HUD Card Obsidian
+val DarkCardBorder = Color(0x3300F0FF)      // Holographic Cyan Hairline
+val DarkOnSurface = Color(0xFFF0F6FC)       // Crisp Tech White
+val DarkOnSurfaceVariant = Color(0xFF8B9CB5)// Titanium Slate Gray
+
+// Legacy / fallback compatibility
 val Purple80 = Color(0xFFD0BCFF)
 val PurpleGrey80 = Color(0xFFCCC2DC)
 val Pink80 = Color(0xFFEFB8C8)

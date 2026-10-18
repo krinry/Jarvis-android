@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -179,44 +180,79 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
         ) {
-            // ===== HERO =====
+            // ===== STARK SYSTEM PROTOCOLS HERO =====
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Brush.linearGradient(listOf(JarvisPrimary, Color(0xFF8E7CF3), JarvisSecondary.copy(alpha = 0.6f))))
-                    .padding(24.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(DarkSurfaceVariant, DarkCard, DarkSurface)
+                        )
+                    )
+                    .border(1.dp, DarkCardBorder, RoundedCornerShape(20.dp))
+                    .padding(20.dp)
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(56.dp).clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(StarkCyan.copy(alpha = 0.12f))
+                                .border(1.dp, StarkCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
-                        ) { Text("J", fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.White) }
-                        Spacer(Modifier.width(16.dp))
+                        ) {
+                            Icon(Icons.Default.Security, null, tint = StarkCyan, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("JARVIS", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp, letterSpacing = 3.sp)
                             Text(
-                                if (engineMode == SecureKeyStore.ENGINE_GEMINI_LIVE) "Gemini Live Multimodal Voice"
-                                else "AI Voice Assistant",
-                                color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, letterSpacing = 1.sp
+                                "SYSTEM PROTOCOLS",
+                                color = DarkOnSurface,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 18.sp,
+                                letterSpacing = 2.sp
+                            )
+                            Text(
+                                if (engineMode == SecureKeyStore.ENGINE_GEMINI_LIVE) "Gemini 3.8 Live Multimodal Core"
+                                else "Groq LLaMA Edge Engine",
+                                color = StarkCyan,
+                                fontSize = 12.sp,
+                                letterSpacing = 0.5.sp
                             )
                         }
                     }
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(16.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.1f))
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkBackground.copy(alpha = 0.6f))
+                            .border(1.dp, DarkCardBorder, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(if (agentEnabled) Icons.Default.PowerSettingsNew else Icons.Default.PowerOff, null, tint = Color.White, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
+                        Icon(
+                            if (agentEnabled) Icons.Default.PowerSettingsNew else Icons.Default.PowerOff,
+                            null,
+                            tint = if (agentEnabled) StarkGreen else StarkGold,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(if (agentEnabled) "Agent Active" else "Agent Offline", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Text(if (agentEnabled) "Tap bubble to give command" else "Turn on to start", color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+                            Text(
+                                if (agentEnabled) "OVERLAY ARC REACTOR ACTIVE" else "OVERLAY ARC REACTOR OFFLINE",
+                                color = DarkOnSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                if (agentEnabled) "Tap floating reactor or say 'Hey Jarvis'" else "Toggle on to launch floating HUD",
+                                color = DarkOnSurfaceVariant,
+                                fontSize = 11.sp
+                            )
                         }
                         Switch(
                             checked = agentEnabled,
@@ -226,7 +262,11 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                                 if (enabled) startBubbleService(context) else stopBubbleService(context)
                                 refreshKey++
                             },
-                            colors = SwitchDefaults.colors(checkedTrackColor = Color.White.copy(alpha = 0.35f), checkedThumbColor = Color.White, uncheckedTrackColor = Color.White.copy(alpha = 0.1f), uncheckedThumbColor = Color.White.copy(alpha = 0.5f))
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = StarkCyan,
+                                checkedThumbColor = Color.White,
+                                uncheckedTrackColor = DarkSurfaceVariant
+                            )
                         )
                     }
                 }
@@ -692,7 +732,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(40.dp))
-            Text("Jarvis v1.2 • with Gemini Live API", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
+            Text("Jarvis • Made by krinry • with Gemini Live API", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -720,16 +760,22 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun SectionHeader(text: String, icon: ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp, top = 4.dp)) {
-        Icon(icon, null, tint = JarvisAccent, modifier = Modifier.size(18.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)) {
+        Icon(icon, null, tint = StarkCyan, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text.uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 2.sp, color = JarvisAccent)
+        Text(text.uppercase(), fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 2.sp, color = StarkCyan)
     }
 }
 
 @Composable
 private fun SettingsRow(icon: ImageVector, title: String, subtitle: String, iconColor: Color, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), shape = RoundedCornerShape(16.dp), color = DarkCard) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = DarkCard,
+        border = BorderStroke(1.dp, DarkCardBorder)
+    ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(iconColor.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
                 Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
@@ -746,25 +792,31 @@ private fun SettingsRow(icon: ImageVector, title: String, subtitle: String, icon
 
 @Composable
 private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, isGranted: Boolean, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), shape = RoundedCornerShape(16.dp), color = DarkCard) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = DarkCard,
+        border = BorderStroke(1.dp, if (isGranted) StarkGreen.copy(alpha = 0.35f) else DarkCardBorder)
+    ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
-                    .background(if (isGranted) JarvisSuccess.copy(alpha = 0.15f) else JarvisPrimary.copy(alpha = 0.15f)),
+                    .background(if (isGranted) StarkGreen.copy(alpha = 0.15f) else StarkGold.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
-            ) { Icon(icon, null, tint = if (isGranted) JarvisSuccess else JarvisPrimary, modifier = Modifier.size(20.dp)) }
+            ) { Icon(icon, null, tint = if (isGranted) StarkGreen else StarkGold, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = DarkOnSurface)
                 Text(subtitle, fontSize = 12.sp, color = DarkOnSurfaceVariant)
             }
             if (isGranted) {
-                Box(Modifier.size(28.dp).clip(CircleShape).background(JarvisSuccess.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Check, null, tint = JarvisSuccess, modifier = Modifier.size(16.dp))
+                Box(Modifier.size(28.dp).clip(CircleShape).background(StarkGreen.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, null, tint = StarkGreen, modifier = Modifier.size(16.dp))
                 }
             } else {
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(JarvisPrimary).padding(horizontal = 14.dp, vertical = 6.dp)) {
-                    Text("Grant", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(StarkCyan).padding(horizontal = 14.dp, vertical = 6.dp)) {
+                    Text("Grant", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -777,13 +829,14 @@ private fun SwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    iconColor: Color = JarvisPrimary,
+    iconColor: Color = StarkCyan,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         shape = RoundedCornerShape(16.dp),
-        color = DarkCard
+        color = DarkCard,
+        border = BorderStroke(1.dp, DarkCardBorder)
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -803,7 +856,7 @@ private fun SwitchRow(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = JarvisPrimary,
+                    checkedTrackColor = StarkCyan,
                     uncheckedTrackColor = DarkSurfaceVariant
                 )
             )
@@ -879,31 +932,8 @@ private fun ModelPickerDialog(context: Context, target: String, onSelect: (Strin
 // === Helpers ===
 // =============================================================================
 
-private fun checkAccessibilityEnabled(context: Context): Boolean {
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-    return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
-}
+private fun checkAccessibilityEnabled(context: Context): Boolean = dev.krinry.jarvis.system.JarvisServiceLauncher.isAccessibilityEnabled(context)
 
-private fun startBubbleService(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
-        Toast.makeText(context, "Grant overlay permission first", Toast.LENGTH_LONG).show()
-        return
-    }
-    try {
-        val intent = Intent(context, FloatingBubbleService::class.java).apply { action = FloatingBubbleService.ACTION_START }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-    } catch (e: Exception) {
-        Toast.makeText(context, "Could not start Jarvis: ${e.message?.take(50)}", Toast.LENGTH_LONG).show()
-    }
-}
+private fun startBubbleService(context: Context) = dev.krinry.jarvis.system.JarvisServiceLauncher.startBubbleService(context)
 
-private fun stopBubbleService(context: Context) {
-    try {
-        context.startService(Intent(context, FloatingBubbleService::class.java).apply { action = FloatingBubbleService.ACTION_STOP })
-    } catch (_: Exception) {}
-}
+private fun stopBubbleService(context: Context) = dev.krinry.jarvis.system.JarvisServiceLauncher.stopBubbleService(context)
