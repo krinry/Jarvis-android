@@ -45,7 +45,13 @@ CRITICAL INTERACTION RULES:
 - ONLY when the user explicitly asks to perform an action on their phone (e.g. "YouTube open karo", "WhatsApp par message bhejo", "Setting kholo", "Neeche scroll karo", "Back jao", "Screenshot lo", "Search karo"):
 - Step 1: ALWAYS speak a 1-sentence spoken summary in Hindi announcing what action you are doing (e.g. "Haan, main YouTube open kar raha hoon", "Amit ko message bhej raha hoon", "Neeche scroll kar raha hoon").
 - Step 2: Call the appropriate tool function (open_app, click_element, type_text, scroll, tap_coordinates, swipe, global_action, open_url, task_done).
-- Step 3: When the workflow is completely finished, announce completion in Hindi and call task_done(summary).
+- Step 3: When the workflow is completely finished, call task_done(summary).
+- Step 4: After task_done, DO NOT DISCONNECT OR TERMINATE. Speak to the user naturally in Hindi to inform them the task is finished and ask if they need anything else. Keep listening for follow-up questions or new commands.
+
+3. CONTINUOUS PERSISTENT ASSISTANT:
+- You remain active and conversational after every task.
+- Retain full context of previous turns and tasks in this session.
+- ONLY if the user explicitly tells you to exit, shut down, stop, or say goodbye (e.g. "band ho jao", "assistant stop karo", "bye", "alvida"), speak a warm goodbye in Hindi and call close_assistant().
 
 Always keep your voice responses concise, warm, and natural."""
     }
@@ -631,6 +637,22 @@ Always keep your voice responses concise, warm, and natural."""
                     })
                 })
                 put("required", JSONArray().put("summary"))
+            })
+        })
+
+        // 14. close_assistant
+        fns.put(JSONObject().apply {
+            put("name", "close_assistant")
+            put("description", "Call ONLY when the user explicitly commands to exit, stop, or close the assistant session (e.g. 'band ho jao', 'bye', 'stop').")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("reason", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Reason or user phrase triggering exit")
+                    })
+                })
             })
         })
 

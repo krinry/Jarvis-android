@@ -468,6 +468,8 @@ class FloatingBubbleService : Service() {
     // === Subtitle System ===
     // =========================================================================
 
+    private var subtitleFadeJob: Job? = null
+
     private fun addSubtitle(text: String) {
         subtitleHistory.add(text)
         while (subtitleHistory.size > MAX_SUBTITLE_LINES) subtitleHistory.removeAt(0)
@@ -482,6 +484,12 @@ class FloatingBubbleService : Service() {
             }
             val tv = view.findViewWithTag<TextView>("subtitle_text")
             tv?.text = subtitleHistory.joinToString("\n")
+        }
+
+        subtitleFadeJob?.cancel()
+        subtitleFadeJob = scope.launch {
+            delay(4500)
+            clearSubtitles()
         }
     }
 

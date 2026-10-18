@@ -7,6 +7,7 @@ import android.media.MediaRecorder
 import android.util.Log
 import dev.krinry.jarvis.ai.AudioTrackPlayer
 import dev.krinry.jarvis.ai.GeminiLiveClient
+import dev.krinry.jarvis.data.ConversationHistoryStore
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
 import kotlinx.coroutines.*
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - GeminiLiveClient (WebSocket, STT, TTS, Tool Calling)
  * - AudioRecord (continuous 16kHz PCM streaming from microphone)
  * - AudioTrackPlayer (native 24kHz PCM playback through loudspeaker)
+ * - ConversationHistoryStore (offline SQLite conversation & action history)
  * - AutoAgentService & ActionExecutor (Android UI control & gesture execution)
  * - UiTreeExtractor (screen reading & feedback)
  */
@@ -34,7 +36,12 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     private var liveClient: GeminiLiveClient? = null
     private var audioPlayer: AudioTrackPlayer? = null
     private var audioRecord: AudioRecord? = null
-    private var fallbackTts: AgentTtsManager? = null
+
+    private val historyStore = ConversationHistoryStore.getInstance(context)
+    private var currentSessionId = "sess_${System.currentTimeMillis()}"
+
+    private val userTranscriptBuffer = StringBuilder()
+    private val assistantTranscriptBuffer = StringBuilder()
 
     private val isSessionActive = AtomicBoolean(false)
     private val isRecordingMic = AtomicBoolean(false)
@@ -65,12 +72,14 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         val model = SecureKeyStore.getGeminiLiveModel(context)
         val voice = SecureKeyStore.getGeminiVoice(context)
 
+        currentSessionId = "sess_${System.currentTimeMillis()}"
+        userTranscriptBuffer.setLength(0)
+        assistantTranscriptBuffer.setLength(0)
+
         isSessionActive.set(true)
         isModelSpeaking.set(false)
         onStatusUpdate?.invoke("⚡ Gemini Live se connect ho raha hai...")
         onThinkingChanged?.invoke(true)
-
-        fallbackTts = AgentTtsManager(context)
 
         audioPlayer = AudioTrackPlayer(context).apply {
             onPlaybackStateChanged = { isPlaying ->
@@ -83,7 +92,6 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
                         isModelSpeaking.set(false)
                         withContext(Dispatchers.Main) {
                             if (isSessionActive.get()) {
-                                onStatusUpdate?.invoke("🎤 Sun raha hoon... Boliye")
                                 onThinkingChanged?.invoke(false)
                             }
                         }
@@ -101,18 +109,15 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     fun stopSession() {
         if (!isSessionActive.getAndSet(false)) return
 
+        // Flush any lingering conversation transcripts to offline database
+        flushTranscriptsToHistory()
+
         stopMicRecording()
         isModelSpeaking.set(false)
 
         audioPlayer?.stopAndClear()
         audioPlayer?.release()
         audioPlayer = null
-
-        try {
-            fallbackTts?.stop()
-            fallbackTts?.shutdown()
-        } catch (_: Exception) {}
-        fallbackTts = null
 
         liveClient?.disconnect()
         liveClient = null
@@ -123,6 +128,19 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     }
 
     fun isRunning(): Boolean = isSessionActive.get()
+
+    private fun flushTranscriptsToHistory() {
+        if (userTranscriptBuffer.isNotBlank()) {
+            val userText = userTranscriptBuffer.toString().trim()
+            historyStore.saveUserMessage(currentSessionId, userText)
+            userTranscriptBuffer.setLength(0)
+        }
+        if (assistantTranscriptBuffer.isNotBlank()) {
+            val assistantText = assistantTranscriptBuffer.toString().trim()
+            historyStore.saveAssistantMessage(currentSessionId, assistantText)
+            assistantTranscriptBuffer.setLength(0)
+        }
+    }
 
     // =========================================================================
     // === Microphone Audio Streaming ===
@@ -201,12 +219,11 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
                         }
                         val rms = if (sampleCount > 0) Math.sqrt(sumSquares / sampleCount) else 0.0
 
-                        // ACOUSTIC ECHO & CUT-OFF PROTECTION:
-                        // When Gemini is generating a response or playing audio through the loudspeaker,
-                        // do NOT send microphone audio to the Gemini server.
-                        // The phone's mic is inches away from its loudspeaker; sending mic audio while
-                        // the speaker is active causes Gemini's server-side VAD to detect speech and
-                        // immediately cut off ("interrupted: true") mid-sentence.
+                        // ACOUSTIC ECHO & SELF-INTERRUPTION PROTECTION:
+                        // When Gemini is speaking or AudioTrack is actively playing through the loudspeaker,
+                        // completely mute mic input streaming to Gemini.
+                        // This prevents loudspeaker audio from feeding back into the mic and falsely
+                        // triggering server-side VAD barge-in ("interrupted: true").
                         if (isModelSpeaking.get() || audioPlayer?.isCurrentlyPlaying() == true) {
                             continue
                         }
@@ -273,7 +290,7 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
             onStatusUpdate?.invoke("✅ Gemini Live taiyar hai! Boliye...")
             onThinkingChanged?.invoke(false)
 
-            // Screen snapshot lo aur Gemini ko shuruati context do
+            // Screen snapshot lo aur Gemini ko shuruati context + past conversation memory do
             sendInitialScreenState()
 
             // Mic recording shuru karo
@@ -287,33 +304,61 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
             val root = service?.getRootNode()
             val nodes = UiTreeExtractor.extractTree(root)
             val compactJson = UiTreeExtractor.toJson(nodes)
-            val contextText = "CURRENT PHONE SCREEN STATE (Reference):\n$compactJson\nUse this screen UI tree ONLY IF the user explicitly requests an action on their phone. For casual conversation, greetings, or questions, chat normally in Hindi without calling tools."
+
+            val pastHistory = historyStore.getRecentContextForLivePrompt(maxTurns = 8)
+            val historyBlock = if (pastHistory.isNotBlank()) {
+                "\n\nPAST CONVERSATION HISTORY (Previous interactions with user):\n$pastHistory\nRemember this context so the user doesn't have to repeat themselves.\n"
+            } else ""
+
+            val contextText = """CURRENT PHONE SCREEN STATE (Reference):
+$compactJson$historyBlock
+CRITICAL OPERATING GUIDELINES:
+1. CASUAL CHAT & QUESTIONS: Speak directly and naturally in Hindi. DO NOT CALL ANY TOOLS.
+2. AUTOMATION & TASKS: Only when the user asks you to perform an action on the phone, speak a 1-sentence Hindi announcement and call the required tools.
+3. PERSISTENT ASSISTANT: Never close or end the session on task completion. After calling task_done, ask the user naturally in Hindi if they need anything else and keep listening."""
+
             liveClient?.sendClientContent(contextText, turnComplete = false)
-            Log.d(TAG, "Sent initial screen state with ${nodes.size} nodes")
+            Log.d(TAG, "Sent initial screen state with ${nodes.size} nodes and past context (chars=${pastHistory.length})")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to capture initial screen", e)
         }
     }
 
     override fun onAudioDataReceived(pcmData: ByteArray) {
-        // Native Gemini TTS audio play karo (loudspeaker via AudioTrack)
+        // Native Gemini 24kHz Live TTS audio playback via AudioTrack
         isModelSpeaking.set(true)
-        Log.d(TAG, "Audio data chunk received from Gemini: ${pcmData.size} bytes")
         audioPlayer?.enqueueChunk(pcmData)
     }
 
     override fun onInputTranscript(text: String) {
         Log.d(TAG, "User Input STT: $text")
+        // Assistant transcript flush karo if previous turn ended
+        if (assistantTranscriptBuffer.isNotBlank()) {
+            historyStore.saveAssistantMessage(currentSessionId, assistantTranscriptBuffer.toString().trim())
+            assistantTranscriptBuffer.setLength(0)
+        }
+
+        userTranscriptBuffer.append(text).append(" ")
+        val fullUserText = userTranscriptBuffer.toString().trim()
         engineScope.launch {
-            onStatusUpdate?.invoke("🗣️ \"$text\"")
+            onStatusUpdate?.invoke("🗣️ \"$fullUserText\"")
         }
     }
 
     override fun onOutputTranscript(text: String) {
         Log.d(TAG, "Gemini Output TTS: $text")
         isModelSpeaking.set(true)
+
+        // Save user speech to offline history on transition to assistant speech
+        if (userTranscriptBuffer.isNotBlank()) {
+            historyStore.saveUserMessage(currentSessionId, userTranscriptBuffer.toString().trim())
+            userTranscriptBuffer.setLength(0)
+        }
+
+        assistantTranscriptBuffer.append(text).append(" ")
+        val fullAssistantText = assistantTranscriptBuffer.toString().trim()
         engineScope.launch {
-            onStatusUpdate?.invoke("⚡ $text")
+            onStatusUpdate?.invoke("⚡ $fullAssistantText")
         }
     }
 
@@ -325,6 +370,9 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     }
 
     private suspend fun executeToolCall(call: GeminiLiveClient.LiveFunctionCall) {
+        // Save pending transcripts before executing tool
+        flushTranscriptsToHistory()
+
         val service = AutoAgentService.instance
         if (service == null) {
             val errObj = JSONObject().apply {
@@ -340,14 +388,48 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         val args = call.args
 
         val actionSummary = getHindiActionName(call.name, args)
-        onStatusUpdate?.invoke("🔧 $actionSummary")
 
-        // Speak summary out loud if Gemini Live is not already playing spoken audio
-        if (audioPlayer?.isCurrentlyPlaying() == false) {
-            fallbackTts?.speak(actionSummary)
+        // Handle close_assistant tool (User explicitly asked to stop/exit)
+        if (call.name == "close_assistant") {
+            val reason = args.optString("reason", "User requested exit")
+            historyStore.saveAction(currentSessionId, "close_assistant", reason)
+            onStatusUpdate?.invoke("⏹ Session samapt")
+            val responseObj = JSONObject().apply {
+                put("status", "closing")
+            }
+            liveClient?.sendToolResponse(call.id, call.name, responseObj)
+            delay(600)
+            stopSession()
+            return
         }
 
-        // Execute action based on function declaration
+        // Handle task_done tool (Keep session open! Do NOT stop!)
+        if (call.name == "task_done") {
+            val summary = args.optString("summary", "Kaam poora ho gaya!")
+            historyStore.saveAction(currentSessionId, "task_done", summary)
+            onStatusUpdate?.invoke("✅ $summary")
+            onThinkingChanged?.invoke(false)
+
+            delay(300)
+            val freshRoot = service.getRootNode()
+            val freshNodes = UiTreeExtractor.extractTree(freshRoot)
+            val freshUiJson = UiTreeExtractor.toJson(freshNodes)
+
+            val responseObj = JSONObject().apply {
+                put("status", "success")
+                put("result", "Task completed: $summary")
+                put("instruction", "The task is successfully completed. Speak to the user naturally in Hindi to inform them it's done and ask if they need anything else. Keep listening for their next command or conversation. DO NOT call task_done again unless another task is executed.")
+                put("currentScreenUi", freshUiJson)
+            }
+            liveClient?.sendToolResponse(call.id, call.name, responseObj)
+            // DO NOT stopSession() here! Jarvis remains active and conversational!
+            return
+        }
+
+        // Record action to offline history database
+        historyStore.saveAction(currentSessionId, call.name, actionSummary)
+
+        // Execute UI action cleanly in background without robotic TTS announcements
         val executionResult = when (call.name) {
             "open_app" -> {
                 val appName = args.optString("appName")
@@ -560,18 +642,10 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
             "read_screen" -> {
                 "✅ Screen read ho gaya"
             }
-            "task_done" -> {
-                val summary = args.optString("summary", "Task completed")
-                onStatusUpdate?.invoke("✅ $summary")
-                onThinkingChanged?.invoke(false)
-                "✅ $summary"
-            }
             else -> {
                 "❓ Unknown function: ${call.name}"
             }
         }
-
-        onStatusUpdate?.invoke(executionResult)
 
         // Screen transition / settle hone do
         delay(400)
@@ -588,15 +662,6 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         }
 
         liveClient?.sendToolResponse(call.id, call.name, responseObj)
-
-        if (call.name == "task_done") {
-            val summary = args.optString("summary", "Kaam poora ho gaya!")
-            if (audioPlayer?.isCurrentlyPlaying() == false) {
-                fallbackTts?.speak(summary)
-            }
-            delay(1500)
-            stopSession()
-        }
     }
 
     private fun getHindiActionName(name: String, args: JSONObject): String {
@@ -616,6 +681,7 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
             "clipboard_action" -> "Clipboard action kar raha hoon"
             "read_screen" -> "Screen inspect kar raha hoon"
             "task_done" -> args.optString("summary", "Kaam poora ho gaya!")
+            "close_assistant" -> "Assistant session band kar raha hoon"
             else -> name
         }
     }
@@ -628,9 +694,17 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         Log.d(TAG, "onInterrupted received from server")
         audioPlayer?.stopAndClear()
         isModelSpeaking.set(false)
+        if (assistantTranscriptBuffer.isNotBlank()) {
+            historyStore.saveAssistantMessage(currentSessionId, assistantTranscriptBuffer.toString().trim())
+            assistantTranscriptBuffer.setLength(0)
+        }
     }
 
     override fun onTurnComplete() {
+        if (assistantTranscriptBuffer.isNotBlank()) {
+            historyStore.saveAssistantMessage(currentSessionId, assistantTranscriptBuffer.toString().trim())
+            assistantTranscriptBuffer.setLength(0)
+        }
         engineScope.launch {
             onThinkingChanged?.invoke(false)
         }

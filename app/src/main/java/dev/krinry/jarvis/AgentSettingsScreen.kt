@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.ai.ModelInfo
+import dev.krinry.jarvis.data.ConversationHistoryStore
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
 import dev.krinry.jarvis.service.FloatingBubbleService
@@ -452,6 +453,51 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                 SettingsRow(Icons.Default.SwapHoriz, "Fallback Model",
                     fallbackModel.ifEmpty { selectedProvider.defaultFallbackModel }, JarvisAccent
                 ) { modelPickerTarget = "fallback"; showModelPicker = true }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("Offline Memory & Context", Icons.Default.History)
+
+            val historyStore = remember { ConversationHistoryStore.getInstance(context) }
+            var messageCount by remember(refreshKey) { mutableIntStateOf(historyStore.getMessageCount()) }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp), color = DarkCard
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
+                                .background(JarvisPrimary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Storage, null, tint = JarvisPrimary, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Persistent Conversation Memory", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = DarkOnSurface)
+                            Text(
+                                if (messageCount == 0) "No conversations stored yet" else "$messageCount entries stored offline",
+                                fontSize = 12.sp, color = DarkOnSurfaceVariant
+                            )
+                        }
+                        if (messageCount > 0) {
+                            IconButton(onClick = {
+                                historyStore.clearAllHistory()
+                                messageCount = 0
+                                Toast.makeText(context, "Memory cleared", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Default.DeleteOutline, "Clear History", tint = DarkOnSurfaceVariant)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Jarvis automatically saves all user conversations, timestamps, and task summaries offline so context is never lost across sessions.",
+                        fontSize = 11.sp, color = DarkOnSurfaceVariant
+                    )
+                }
             }
 
             Spacer(Modifier.height(40.dp))
