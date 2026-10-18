@@ -137,8 +137,10 @@ class FloatingBubbleService : Service() {
                     addSubtitle(status)
                     if (status.startsWith("✅")) {
                         stopThinkingAnimation()
-                        playCompletionSound()
-                        vibratePattern(longArrayOf(0, 80, 60, 80))
+                        if (status.contains("Ho gaya") || status.contains("completed") || status.contains("poora")) {
+                            playCompletionSound()
+                            vibratePattern(longArrayOf(0, 80, 60, 80))
+                        }
                     } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
                         stopThinkingAnimation()
                         vibrateShort()

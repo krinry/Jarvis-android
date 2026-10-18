@@ -97,13 +97,13 @@ class AudioTrackPlayer(private val context: Context) {
                     }
                 } else {
                     if (isPlaying.get()) {
-                        delay(120) // Allow small gap between chunks before declaring playback ended
+                        delay(350) // Allow up to 350ms between network chunks before declaring playback ended
                         if (audioQueue.isEmpty() && isPlaying.getAndSet(false)) {
                             requestAudioFocus(false)
                             onPlaybackStateChanged?.invoke(false)
                         }
                     } else {
-                        delay(15)
+                        delay(20)
                     }
                 }
             }

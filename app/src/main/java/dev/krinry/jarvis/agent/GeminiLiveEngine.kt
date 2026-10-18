@@ -34,9 +34,11 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     private var liveClient: GeminiLiveClient? = null
     private var audioPlayer: AudioTrackPlayer? = null
     private var audioRecord: AudioRecord? = null
+    private var fallbackTts: AgentTtsManager? = null
 
     private val isSessionActive = AtomicBoolean(false)
     private val isRecordingMic = AtomicBoolean(false)
+    private val isModelSpeaking = AtomicBoolean(false)
 
     private val engineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var micJob: Job? = null
@@ -64,13 +66,28 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         val voice = SecureKeyStore.getGeminiVoice(context)
 
         isSessionActive.set(true)
+        isModelSpeaking.set(false)
         onStatusUpdate?.invoke("⚡ Gemini Live se connect ho raha hai...")
         onThinkingChanged?.invoke(true)
 
+        fallbackTts = AgentTtsManager(context)
+
         audioPlayer = AudioTrackPlayer(context).apply {
             onPlaybackStateChanged = { isPlaying ->
-                if (!isPlaying && !isRecordingMic.get()) {
-                    onThinkingChanged?.invoke(false)
+                if (isPlaying) {
+                    isModelSpeaking.set(true)
+                    onThinkingChanged?.invoke(true)
+                } else {
+                    engineScope.launch {
+                        delay(300) // Allow room echo to clear before unmuting mic
+                        isModelSpeaking.set(false)
+                        withContext(Dispatchers.Main) {
+                            if (isSessionActive.get()) {
+                                onStatusUpdate?.invoke("🎤 Sun raha hoon... Boliye")
+                                onThinkingChanged?.invoke(false)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -85,9 +102,17 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         if (!isSessionActive.getAndSet(false)) return
 
         stopMicRecording()
+        isModelSpeaking.set(false)
+
         audioPlayer?.stopAndClear()
         audioPlayer?.release()
         audioPlayer = null
+
+        try {
+            fallbackTts?.stop()
+            fallbackTts?.shutdown()
+        } catch (_: Exception) {}
+        fallbackTts = null
 
         liveClient?.disconnect()
         liveClient = null
@@ -176,20 +201,13 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
                         }
                         val rms = if (sampleCount > 0) Math.sqrt(sumSquares / sampleCount) else 0.0
 
-                        // Acoustic Echo Protection:
-                        // While Gemini is speaking via the phone's loudspeaker, do NOT send
-                        // the speaker output back into Gemini as user speech, which causes
-                        // self-interruption (Gemini thinking user interrupted).
-                        val isGeminiSpeaking = audioPlayer?.isCurrentlyPlaying() == true
-                        if (isGeminiSpeaking) {
-                            // User can barge in by speaking loudly over the assistant
-                            if (rms > 2800.0) {
-                                Log.d(TAG, "Intentional user barge-in detected (RMS=${rms.toInt()})")
-                                audioPlayer?.stopAndClear()
-                                liveClient?.sendRealtimeAudio(chunk)
-                                isUserSpeaking = true
-                                silenceFramesCount = 0
-                            }
+                        // ACOUSTIC ECHO & CUT-OFF PROTECTION:
+                        // When Gemini is generating a response or playing audio through the loudspeaker,
+                        // do NOT send microphone audio to the Gemini server.
+                        // The phone's mic is inches away from its loudspeaker; sending mic audio while
+                        // the speaker is active causes Gemini's server-side VAD to detect speech and
+                        // immediately cut off ("interrupted: true") mid-sentence.
+                        if (isModelSpeaking.get() || audioPlayer?.isCurrentlyPlaying() == true) {
                             continue
                         }
 
@@ -269,7 +287,7 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
             val root = service?.getRootNode()
             val nodes = UiTreeExtractor.extractTree(root)
             val compactJson = UiTreeExtractor.toJson(nodes)
-            val contextText = "DEVICE SCREEN UI STATE:\n$compactJson\nPerform the user's voice command using your tools. Speak concisely in Hindi."
+            val contextText = "CURRENT PHONE SCREEN STATE (Reference):\n$compactJson\nUse this screen UI tree ONLY IF the user explicitly requests an action on their phone. For casual conversation, greetings, or questions, chat normally in Hindi without calling tools."
             liveClient?.sendClientContent(contextText, turnComplete = false)
             Log.d(TAG, "Sent initial screen state with ${nodes.size} nodes")
         } catch (e: Exception) {
@@ -279,6 +297,7 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
     override fun onAudioDataReceived(pcmData: ByteArray) {
         // Native Gemini TTS audio play karo (loudspeaker via AudioTrack)
+        isModelSpeaking.set(true)
         Log.d(TAG, "Audio data chunk received from Gemini: ${pcmData.size} bytes")
         audioPlayer?.enqueueChunk(pcmData)
     }
@@ -292,6 +311,7 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
     override fun onOutputTranscript(text: String) {
         Log.d(TAG, "Gemini Output TTS: $text")
+        isModelSpeaking.set(true)
         engineScope.launch {
             onStatusUpdate?.invoke("⚡ $text")
         }
@@ -319,7 +339,13 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         val currentNodes = UiTreeExtractor.extractTree(rootNode)
         val args = call.args
 
-        onStatusUpdate?.invoke("🔧 ${getHindiActionName(call.name, args)}")
+        val actionSummary = getHindiActionName(call.name, args)
+        onStatusUpdate?.invoke("🔧 $actionSummary")
+
+        // Speak summary out loud if Gemini Live is not already playing spoken audio
+        if (audioPlayer?.isCurrentlyPlaying() == false) {
+            fallbackTts?.speak(actionSummary)
+        }
 
         // Execute action based on function declaration
         val executionResult = when (call.name) {
@@ -564,6 +590,10 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
         liveClient?.sendToolResponse(call.id, call.name, responseObj)
 
         if (call.name == "task_done") {
+            val summary = args.optString("summary", "Kaam poora ho gaya!")
+            if (audioPlayer?.isCurrentlyPlaying() == false) {
+                fallbackTts?.speak(summary)
+            }
             delay(1500)
             stopSession()
         }
@@ -571,16 +601,21 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
     private fun getHindiActionName(name: String, args: JSONObject): String {
         return when (name) {
-            "open_app" -> "App khol raha hoon: ${args.optString("appName")}"
-            "click_element" -> "Click kar raha hoon"
-            "type_text" -> "Type kar raha hoon: ${args.optString("text").take(15)}"
-            "scroll" -> "Scroll kar raha hoon (${args.optString("direction")})"
-            "tap_coordinates" -> "Tap kar raha hoon"
+            "open_app" -> "${args.optString("appName")} open kar raha hoon"
+            "click_element" -> {
+                val label = args.optString("text").takeIf { it.isNotBlank() } ?: "element"
+                "$label par click kar raha hoon"
+            }
+            "type_text" -> "${args.optString("text")} type kar raha hoon"
+            "scroll" -> "Screen ${if (args.optString("direction").equals("up", ignoreCase = true)) "upar" else "neeche"} scroll kar raha hoon"
+            "tap_coordinates" -> "Screen par tap kar raha hoon"
             "swipe" -> "Swipe kar raha hoon"
-            "global_action" -> "${args.optString("action")} daba raha hoon"
-            "open_url" -> "URL khol raha hoon"
+            "global_action" -> "${args.optString("action")} button daba raha hoon"
+            "open_url" -> "Link khol raha hoon: ${args.optString("url")}"
             "take_screenshot" -> "Screenshot le raha hoon"
-            "task_done" -> "Ho gaya!"
+            "clipboard_action" -> "Clipboard action kar raha hoon"
+            "read_screen" -> "Screen inspect kar raha hoon"
+            "task_done" -> args.optString("summary", "Kaam poora ho gaya!")
             else -> name
         }
     }
@@ -590,8 +625,9 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     }
 
     override fun onInterrupted() {
-        // Barge-in: User started speaking while Gemini was speaking
+        Log.d(TAG, "onInterrupted received from server")
         audioPlayer?.stopAndClear()
+        isModelSpeaking.set(false)
     }
 
     override fun onTurnComplete() {
