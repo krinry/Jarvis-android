@@ -58,6 +58,26 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
     private val isRecordingMic = AtomicBoolean(false)
     private val isModelSpeaking = AtomicBoolean(false)
 
+    // Security Gate: Confirmation state for high-risk actions (Anti-Prompt Injection)
+    data class PendingConfirmation(
+        val toolName: String,
+        val args: JSONObject,
+        val description: String,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+    private var pendingConfirmation: PendingConfirmation? = null
+
+    private fun isDangerousAction(name: String, args: JSONObject): Boolean {
+        return when (name) {
+            "execute_shell_command", "clear_app_data", "send_sms" -> true
+            "device_power_control" -> {
+                val action = args.optString("action", "lock").lowercase()
+                action == "reboot" || action == "shutdown"
+            }
+            else -> false
+        }
+    }
+
     private val engineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var micJob: Job? = null
 
@@ -404,7 +424,7 @@ CRITICAL OPERATING GUIDELINES:
             val responseObj = JSONObject().apply {
                 put("status", "closing")
             }
-            liveClient?.sendToolResponse(call.id, call.name, responseObj)
+            liveClient?.sendToolResponse(call.id, call.name, responseObj, scheduling = "WHEN_IDLE")
             delay(600)
             stopSession()
             return
@@ -426,12 +446,43 @@ CRITICAL OPERATING GUIDELINES:
             val responseObj = JSONObject().apply {
                 put("status", "success")
                 put("result", "Task completed: $summary")
-                put("instruction", "The task is successfully completed. Speak to the user naturally in Hindi to inform them it's done and ask if they need anything else. Keep listening for their next command or conversation. DO NOT call task_done again unless another task is executed.")
+                put("instruction", "The task is successfully completed. Speak to the user naturally in their language to inform them it's done and ask if they need anything else. Keep listening for their next command or conversation. DO NOT call task_done again unless another task is executed.")
                 put("currentScreenUi", freshUiJson)
             }
-            liveClient?.sendToolResponse(call.id, call.name, responseObj)
+            liveClient?.sendToolResponse(call.id, call.name, responseObj, scheduling = "WHEN_IDLE")
             // DO NOT stopSession() here! Jarvis remains active and conversational!
             return
+        }
+
+        // Security Confirmation Gate (Anti-Prompt Injection Defense)
+        if (isDangerousAction(call.name, args)) {
+            val isExplicitlyConfirmed = args.optBoolean("user_confirmed", false)
+            val isPendingAuthorized = pendingConfirmation?.let {
+                it.toolName == call.name && (System.currentTimeMillis() - it.timestamp) < 60_000L
+            } ?: false
+
+            if (!isExplicitlyConfirmed && !isPendingAuthorized) {
+                pendingConfirmation = PendingConfirmation(
+                    toolName = call.name,
+                    args = args,
+                    description = actionSummary
+                )
+                SoundEffectsManager.playErrorSound()
+                onStatusUpdate?.invoke("⚠️ SECURITY GATE: Sir's confirmation required for $actionSummary")
+
+                val securityPrompt = JSONObject().apply {
+                    put("status", "requires_confirmation")
+                    put("security_gate", "HIGH_RISK_ACTION")
+                    put("action", actionSummary)
+                    put("instruction", "SECURITY DIRECTIVE: You MUST ask Sir respectfully for verbal confirmation before executing this sensitive operation. Say: 'Sir, do you confirm: $actionSummary?' Wait for Sir's explicit vocal authorization ('Yes', 'Confirm', 'Proceed', 'Haan karo'). Once Sir confirms, call ${call.name} again with user_confirmed=true.")
+                }
+                liveClient?.sendToolResponse(call.id, call.name, securityPrompt, scheduling = "INTERRUPT")
+                return
+            } else {
+                // Action authorized by Sir
+                pendingConfirmation = null
+                Log.i(TAG, "Security Gate Passed: Authorized execution of ${call.name} (actionSummary=$actionSummary)")
+            }
         }
 
         // Record action to offline history database
@@ -878,7 +929,13 @@ CRITICAL OPERATING GUIDELINES:
             put("currentScreenUi", freshUiJson)
         }
 
-        liveClient?.sendToolResponse(call.id, call.name, responseObj)
+        val scheduling = when {
+            executionResult.startsWith("❌") -> "INTERRUPT" // Alert model immediately on failures
+            call.name in setOf("analyze_current_screen", "inspect_real_world", "get_system_diagnostics", "read_latest_otp", "get_recent_notifications", "search_contacts") -> "INTERRUPT"
+            else -> "WHEN_IDLE"
+        }
+
+        liveClient?.sendToolResponse(call.id, call.name, responseObj, scheduling = scheduling)
     }
 
     private fun getHindiActionName(name: String, args: JSONObject): String {
@@ -959,6 +1016,13 @@ CRITICAL OPERATING GUIDELINES:
         }
     }
 
+    override fun onGoAway(timeLeft: String) {
+        Log.w(TAG, "Gemini Live GoAway notice received (timeLeft=$timeLeft)")
+        engineScope.launch {
+            onStatusUpdate?.invoke("🔄 Session refresh in $timeLeft")
+        }
+    }
+
     override fun onError(error: String) {
         engineScope.launch {
             onStatusUpdate?.invoke("❌ $error")
@@ -969,8 +1033,12 @@ CRITICAL OPERATING GUIDELINES:
     override fun onClosed(code: Int, reason: String) {
         engineScope.launch {
             if (isSessionActive.get()) {
-                onStatusUpdate?.invoke("⏹ Connection band hua")
-                stopSession()
+                if (code == 1000) {
+                    onStatusUpdate?.invoke("⏹ Session samapt")
+                    stopSession()
+                } else {
+                    onStatusUpdate?.invoke("🔄 Reconnecting: $reason")
+                }
             }
         }
     }
