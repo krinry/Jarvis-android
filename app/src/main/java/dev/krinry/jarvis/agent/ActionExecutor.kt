@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import dev.krinry.jarvis.service.AutoAgentService
+import dev.krinry.jarvis.system.HardwareControlBridge
 import org.json.JSONObject
 
 /**
@@ -123,6 +124,51 @@ object ActionExecutor {
             "paste" -> executePaste(action, nodes, service)
             "select_all" -> executeSelectAll(action, nodes, service)
             "open_notifications" -> { service.openNotifications(); "✅ Notifications khol diya" }
+            "torch", "toggle_flashlight" -> {
+                val enable = action.text?.contains("off") != true && action.reason?.contains("off") != true
+                val (ok, msg) = HardwareControlBridge.toggleTorch(service.applicationContext, enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "hotspot", "toggle_hotspot" -> {
+                val enable = action.text?.contains("off") != true && action.reason?.contains("off") != true
+                kotlinx.coroutines.runBlocking {
+                    val (ok, msg) = HardwareControlBridge.toggleHotspot(service.applicationContext, enable)
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
+            "volume", "set_volume" -> {
+                val (ok, msg) = HardwareControlBridge.setVolume(service.applicationContext, "media")
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "dnd", "toggle_dnd" -> {
+                val enable = action.text?.contains("off") != true
+                val (ok, msg) = HardwareControlBridge.setDnd(service.applicationContext, enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "auto_rotate", "toggle_auto_rotate" -> {
+                val enable = action.text?.contains("off") != true
+                kotlinx.coroutines.runBlocking {
+                    val (ok, msg) = HardwareControlBridge.toggleAutoRotate(enable)
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
+            "media", "media_control" -> {
+                val act = action.text ?: "play_pause"
+                kotlinx.coroutines.runBlocking {
+                    val (ok, msg) = HardwareControlBridge.mediaControl(act)
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
+            "lock" -> {
+                val (ok, msg) = HardwareControlBridge.lockDevice(service.applicationContext)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "reboot" -> {
+                kotlinx.coroutines.runBlocking {
+                    val (ok, msg) = HardwareControlBridge.rebootDevice()
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
             "wait" -> "⏳ Screen load ho raha hai..."
             "done" -> "✅ Kaam ho gaya!"
             else -> "❓ Unknown action: ${action.action}"

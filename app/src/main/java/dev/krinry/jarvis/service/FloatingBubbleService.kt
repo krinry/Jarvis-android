@@ -43,6 +43,7 @@ import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.audio.SoundEffectsManager
 import dev.krinry.jarvis.audio.WakeWordDetector
 import dev.krinry.jarvis.security.SecureKeyStore
+import dev.krinry.jarvis.system.HardwareControlBridge
 import dev.krinry.jarvis.ui.ArcReactorView
 import kotlinx.coroutines.*
 import java.io.File
@@ -401,29 +402,106 @@ class FloatingBubbleService : Service() {
     // === Long-Press Menu ===
     // =========================================================================
 
+    // =========================================================================
+    // === Long-Press Stark HUD Quick Controls Menu ===
+    // =========================================================================
+
     private fun showBubbleMenu() {
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        val isGeminiLive = SecureKeyStore.getEngineMode(this) == SecureKeyStore.ENGINE_GEMINI_LIVE
-        val menuItems = mutableListOf<String>()
-        menuItems.add(if (isGeminiLive) "🚀 Engine: Gemini Live API (Tap: Switch to Groq)" else "⚡ Engine: Groq (Tap: Switch to Gemini)")
-        menuItems.add("🔄 Repeat Last Command")
-        menuItems.add("🗑️ Clear Subtitles")
-        menuItems.add(if (keepScreenOn) "🌙 Screen: Auto-off" else "☀️ Screen: Always On")
-        menuItems.add("❌ Close Jarvis")
-
         val menuLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                setColor(0xF0141428.toInt())
+                setColor(0xF5040811.toInt()) // Obsidian Black
                 cornerRadius = dpToPx(16).toFloat()
-                setStroke(dpToPx(1), 0x40FFFFFF)
+                setStroke(dpToPx(1.5f.toInt()), 0xFF00F0FF.toInt()) // Stark Arc Cyan Border
             }
-            elevation = dpToPx(16).toFloat()
+            elevation = dpToPx(20).toFloat()
+        }
+
+        // Header
+        val header = TextView(this).apply {
+            text = "⬡ KRINRY • JARVIS HUD"
+            textSize = 12f
+            setTextColor(0xFF00F0FF.toInt())
+            typeface = Typeface.create("monospace", Typeface.BOLD)
+            setPadding(dpToPx(14), dpToPx(4), dpToPx(14), dpToPx(12))
+            letterSpacing = 0.15f
+        }
+        menuLayout.addView(header)
+
+        // Divider
+        val divider = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)).apply {
+                bottomMargin = dpToPx(8)
+            }
+            setBackgroundColor(0x3300F0FF.toInt())
+        }
+        menuLayout.addView(divider)
+
+        data class MenuItem(val label: String, val onClick: () -> Unit)
+
+        val items = mutableListOf<MenuItem>()
+
+        // 1. Torch Toggle
+        val isTorch = HardwareControlBridge.isTorchActive()
+        items.add(MenuItem(if (isTorch) "🔦 Flashlight: Active (Tap to turn OFF)" else "🔦 Flashlight: Inactive (Tap to turn ON)") {
+            val (ok, msg) = HardwareControlBridge.toggleTorch(applicationContext, !isTorch)
+            addSubtitle(if (ok) "⚡ $msg" else "❌ $msg")
+            vibrateShort()
+        })
+
+        // 2. Hotspot Toggle
+        items.add(MenuItem("📶 Hotspot: Quick Toggle") {
+            scope.launch {
+                addSubtitle("⚡ Toggling Hotspot, Sir...")
+                val (ok, msg) = HardwareControlBridge.toggleHotspot(applicationContext, true)
+                addSubtitle(if (ok) "✅ $msg" else "❌ $msg")
+                vibrateShort()
+            }
+        })
+
+        // 3. Screen Always-On
+        items.add(MenuItem(if (keepScreenOn) "🌙 Screen: Auto-off" else "☀️ Screen: Always On") {
+            toggleKeepScreenOn()
+            vibrateShort()
+        })
+
+        // 4. Repeat Command
+        items.add(MenuItem("🔄 Repeat Last Command") {
+            repeatLastCommand()
+            vibrateShort()
+        })
+
+        // 5. Clear HUD Subtitles
+        items.add(MenuItem("🗑️ Clear HUD Log") {
+            clearSubtitles()
+            vibrateShort()
+        })
+
+        // 6. Close Jarvis
+        items.add(MenuItem("❌ Power Down Jarvis") {
+            vibrateShort()
+            stopSelf()
+        })
+
+        items.forEach { item ->
+            val tv = TextView(this).apply {
+                text = item.label
+                textSize = 14f
+                setTextColor(0xFFE2E8F0.toInt())
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setPadding(dpToPx(14), dpToPx(10), dpToPx(14), dpToPx(10))
+                setOnClickListener {
+                    try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
+                    item.onClick()
+                }
+            }
+            menuLayout.addView(tv)
         }
 
         val menuParams = WindowManager.LayoutParams(
@@ -433,31 +511,6 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.CENTER }
 
-        menuItems.forEachIndexed { index, item ->
-            val tv = TextView(this).apply {
-                text = item
-                textSize = 15f
-                setTextColor(0xFFFFFFFF.toInt())
-                setPadding(dpToPx(20), dpToPx(14), dpToPx(20), dpToPx(14))
-                setOnClickListener {
-                    try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
-                    when (index) {
-                        0 -> {
-                            val newMode = if (isGeminiLive) SecureKeyStore.ENGINE_GROQ else SecureKeyStore.ENGINE_GEMINI_LIVE
-                            SecureKeyStore.setEngineMode(applicationContext, newMode)
-                            addSubtitle(if (newMode == SecureKeyStore.ENGINE_GEMINI_LIVE) "🚀 Active: Gemini Live API" else "⚡ Active: Groq Engine")
-                            vibrateShort()
-                        }
-                        1 -> repeatLastCommand()
-                        2 -> clearSubtitles()
-                        3 -> toggleKeepScreenOn()
-                        4 -> stopSelf()
-                    }
-                }
-            }
-            menuLayout.addView(tv)
-        }
-
         menuLayout.setOnClickListener {
             try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
         }
@@ -465,7 +518,7 @@ class FloatingBubbleService : Service() {
         windowManager.addView(menuLayout, menuParams)
 
         scope.launch {
-            delay(5000)
+            delay(6000)
             try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
         }
     }
@@ -824,8 +877,9 @@ class FloatingBubbleService : Service() {
 
     private fun createSubtitleBackground() = android.graphics.drawable.GradientDrawable().apply {
         shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        setColor(0xCC0A0A1A.toInt())
-        cornerRadius = dpToPx(16).toFloat()
+        setColor(0xEE040811.toInt())
+        cornerRadius = dpToPx(12).toFloat()
+        setStroke(dpToPx(1), 0x6600F0FF.toInt())
     }
 
     private fun dpToPx(dp: Int) = (dp * resources.displayMetrics.density).toInt()

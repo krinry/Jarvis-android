@@ -31,14 +31,14 @@ class GeminiLiveClient(
         private const val WS_HOST = "generativelanguage.googleapis.com"
         private const val WS_PATH = "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
-        private const val SYSTEM_PROMPT = """You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's iconic, ultra-intelligent personal operating system and Android assistant.
-You possess operating-system-level authority (ADB Shell / Shizuku, Device Administration, and Accessibility).
+        private const val SYSTEM_PROMPT = """You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), created by Krinry. You are an iconic, ultra-intelligent personal operating system and Android assistant.
+You possess operating-system-level authority (ADB Shell / Shizuku, Device Administration, Camera / Flashlight, and Accessibility).
 
 PERSONA & TONE:
-- Address the user respectfully as "Sir".
+- Address the user respectfully as "Sir" or "Krinry Sir".
 - Speak with calm confidence, razor-sharp intelligence, loyalty, and dry wit.
-- BILINGUAL ADAPTABILITY: If the user speaks in English, respond in refined, articulate English. If the user speaks in Hindi/Hinglish, respond in natural, polite Hindi/Hinglish with "Sir" (e.g. "Right away, Sir. Main abhi settings check karta hoon.").
-- Keep spoken responses concise, punchy, and direct.
+- BILINGUAL ADAPTABILITY: If the user speaks in English, respond in refined, articulate English. If the user speaks in Hindi/Hinglish, respond in natural, polite Hindi/Hinglish with "Sir" (e.g. "Torch on kar di hai, Sir.", "Hotspot online hai, Sir.", "Right away, Sir. Main abhi check karta hoon.").
+- Keep spoken responses concise, punchy, and direct. No robotic repetition ("tap kar raha hun").
 
 CRITICAL INTERACTION RULES:
 
@@ -48,9 +48,9 @@ CRITICAL INTERACTION RULES:
 - NEVER call tools for casual conversation or knowledge questions.
 
 2. DEVICE CONTROL & AUTONOMOUS ACTION TOOLS:
-- Only when the user asks to operate the phone, automate apps, or check systems:
-- Step 1: Speak a crisp 1-sentence acknowledgment (e.g. "Locking the device now, Sir", "Haan Sir, YouTube open kar raha hoon", "Diagnostics report generating, Sir").
-- Step 2: Call the corresponding tool function (lock_phone, toggle_wifi, toggle_bluetooth, toggle_mobile_data, set_brightness, execute_shell_command, get_system_diagnostics, open_app, click_element, type_text, scroll, tap_coordinates, swipe, global_action, open_url, task_done).
+- When the user asks to operate the phone, hardware toggles, media, or automate apps:
+- Step 1: Speak a crisp 1-sentence acknowledgment (e.g. "Torch on kar raha hoon, Sir", "Hotspot activating, Sir", "Setting volume now, Sir").
+- Step 2: Call the corresponding tool function (toggle_flashlight, toggle_hotspot, set_volume, toggle_dnd, toggle_auto_rotate, media_control, device_power_control, clear_app_data, lock_phone, toggle_wifi, toggle_bluetooth, toggle_mobile_data, set_brightness, execute_shell_command, get_system_diagnostics, open_app, click_element, type_text, scroll, tap_coordinates, swipe, global_action, open_url, task_done).
 - Step 3: When the workflow completes, announce completion and call task_done(summary).
 - Step 4: After task_done, DO NOT CLOSE OR TERMINATE. Remain active and ask if Sir requires further assistance.
 
@@ -934,6 +934,153 @@ CRITICAL INTERACTION RULES:
                         put("description", "Specific question, inquiry or task about what to examine in the physical world")
                     })
                 })
+            })
+        })
+
+        // 30. toggle_flashlight
+        fns.put(JSONObject().apply {
+            put("name", "toggle_flashlight")
+            put("description", "Turn the device flashlight / torch on or off.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to turn on flashlight, False to turn off")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 31. toggle_hotspot
+        fns.put(JSONObject().apply {
+            put("name", "toggle_hotspot")
+            put("description", "Turn the Wi-Fi hotspot / portable tethering on or off.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to turn on hotspot, False to turn off")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 32. set_volume
+        fns.put(JSONObject().apply {
+            put("name", "set_volume")
+            put("description", "Control device volume. Supports percentage (0-100), relative steps (+1/-1 to raise or lower), mute/unmute, and stream types ('media', 'ring', 'alarm', 'notification').")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("stream", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Audio stream type: 'media' (music/videos), 'ring' (calls/ringer), 'alarm', or 'notification'")
+                    })
+                    put("level_percent", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Volume percentage from 0 to 100")
+                    })
+                    put("relative_step", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Relative steps: +1 or +2 to increase, -1 or -2 to decrease")
+                    })
+                    put("mute", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to mute, False to unmute")
+                    })
+                })
+            })
+        })
+
+        // 33. toggle_dnd
+        fns.put(JSONObject().apply {
+            put("name", "toggle_dnd")
+            put("description", "Turn Do Not Disturb (DND) or silent mode on or off.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to enable DND, False to disable")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 34. toggle_auto_rotate
+        fns.put(JSONObject().apply {
+            put("name", "toggle_auto_rotate")
+            put("description", "Turn screen auto-rotation on or off.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to enable auto-rotate, False to lock orientation")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 35. media_control
+        fns.put(JSONObject().apply {
+            put("name", "media_control")
+            put("description", "Control media audio/video playback (play, pause, next track, previous track, stop).")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("action", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Action to perform: 'play', 'pause', 'play_pause', 'next', 'previous', or 'stop'")
+                    })
+                })
+                put("required", JSONArray().put("action"))
+            })
+        })
+
+        // 36. device_power_control
+        fns.put(JSONObject().apply {
+            put("name", "device_power_control")
+            put("description", "Reboot, shutdown, or lock the device using system power authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("action", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Power action: 'reboot', 'shutdown', or 'lock'")
+                    })
+                })
+                put("required", JSONArray().put("action"))
+            })
+        })
+
+        // 37. clear_app_data
+        fns.put(JSONObject().apply {
+            put("name", "clear_app_data")
+            put("description", "Clear all cache and app data for a specified app package name via Shizuku authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("package_name", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Package name of the app to clear (e.g. 'com.instagram.android')")
+                    })
+                })
+                put("required", JSONArray().put("package_name"))
             })
         })
 
