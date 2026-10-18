@@ -12,6 +12,8 @@ import dev.krinry.jarvis.receiver.JarvisDeviceAdminReceiver
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
 import dev.krinry.jarvis.service.JarvisNotificationListenerService
+import dev.krinry.jarvis.audio.SoundEffectsManager
+import dev.krinry.jarvis.system.CameraVisionBridge
 import dev.krinry.jarvis.system.ShizukuBridge
 import dev.krinry.jarvis.system.SystemTelemetry
 import dev.krinry.jarvis.system.TelecomBridge
@@ -388,6 +390,11 @@ CRITICAL OPERATING GUIDELINES:
 
         val actionSummary = getHindiActionName(call.name, args)
 
+        // Play high-tech Stark tool execution chime
+        if (call.name != "close_assistant") {
+            SoundEffectsManager.playToolSound()
+        }
+
         // Handle close_assistant tool (User explicitly asked to stop/exit)
         if (call.name == "close_assistant") {
             val reason = args.optString("reason", "User requested exit")
@@ -408,6 +415,7 @@ CRITICAL OPERATING GUIDELINES:
             historyStore.saveAction(currentSessionId, "task_done", summary)
             onStatusUpdate?.invoke("✅ $summary")
             onThinkingChanged?.invoke(false)
+            SoundEffectsManager.playCompleteSound()
 
             delay(300)
             val freshRoot = service?.getRootNode()
@@ -771,9 +779,29 @@ CRITICAL OPERATING GUIDELINES:
                     "Visual screencap unavailable. Screen elements: ${freshText.take(300)}"
                 }
             }
+            "inspect_real_world" -> {
+                val cameraLens = args.optString("camera", "back").lowercase()
+                val question = args.optString("question", "What is in front of the camera?")
+                val facing = if (cameraLens.contains("front") || cameraLens.contains("selfie")) {
+                    android.hardware.camera2.CameraMetadata.LENS_FACING_FRONT
+                } else {
+                    android.hardware.camera2.CameraMetadata.LENS_FACING_BACK
+                }
+                val jpegBytes = CameraVisionBridge.captureSilentSnapshot(context, facing)
+                if (jpegBytes != null) {
+                    liveClient?.sendRealtimeVideoFrame(jpegBytes)
+                    "✅ Real-world optic frame from $cameraLens camera captured and transmitted to your vision stream, Sir. Answer Sir's question: $question"
+                } else {
+                    "❌ Optic sensors could not access the $cameraLens camera. Camera may be in use by another app or permission is missing, Sir."
+                }
+            }
             else -> {
                 "❓ Unknown function: ${call.name}"
             }
+        }
+
+        if (executionResult.startsWith("❌")) {
+            SoundEffectsManager.playErrorSound()
         }
 
         // Screen transition / settle hone do
@@ -795,6 +823,7 @@ CRITICAL OPERATING GUIDELINES:
 
     private fun getHindiActionName(name: String, args: JSONObject): String {
         return when (name) {
+            "inspect_real_world" -> "Camera se samne dekh raha hoon, Sir"
             "open_app" -> "${args.optString("appName")} open kar raha hoon, Sir"
             "click_element" -> {
                 val label = args.optString("text").takeIf { it.isNotBlank() } ?: "element"

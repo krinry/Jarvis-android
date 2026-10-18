@@ -32,6 +32,8 @@ object SecureKeyStore {
     private const val KEY_PRIMARY_MODEL = "primary_model"
     private const val KEY_FALLBACK_MODEL = "fallback_model"
     private const val KEY_REQUEST_DELAY_MS = "request_delay_ms"
+    private const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
+    private const val KEY_SOUND_EFFECTS_ENABLED = "sound_effects_enabled"
 
     private fun getEncryptedPrefs(context: Context) = try {
         val masterKey = MasterKey.Builder(context)
@@ -235,5 +237,25 @@ object SecureKeyStore {
 
     fun isAgentEnabled(context: Context): Boolean {
         return getEncryptedPrefs(context).getBoolean(KEY_AGENT_ENABLED, false)
+    }
+
+    // =========================================================================
+    // === Iron Man Wake Word & Sci-Fi SFX Settings ===
+    // =========================================================================
+
+    fun isWakeWordEnabled(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_WAKE_WORD_ENABLED, true)
+    }
+
+    fun setWakeWordEnabled(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_WAKE_WORD_ENABLED, enabled).apply()
+    }
+
+    fun isSoundEffectsEnabled(context: Context): Boolean {
+        return getEncryptedPrefs(context).getBoolean(KEY_SOUND_EFFECTS_ENABLED, true)
+    }
+
+    fun setSoundEffectsEnabled(context: Context, enabled: Boolean) {
+        getEncryptedPrefs(context).edit().putBoolean(KEY_SOUND_EFFECTS_ENABLED, enabled).apply()
     }
 }

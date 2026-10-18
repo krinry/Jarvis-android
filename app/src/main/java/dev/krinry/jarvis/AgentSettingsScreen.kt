@@ -44,6 +44,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.ai.ModelInfo
+import dev.krinry.jarvis.audio.SoundEffectsManager
 import dev.krinry.jarvis.data.ConversationHistoryStore
 import dev.krinry.jarvis.receiver.JarvisDeviceAdminReceiver
 import dev.krinry.jarvis.security.SecureKeyStore
@@ -104,6 +105,15 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { refreshKey++ }
 
+    var hasCameraPermission by remember(refreshKey) {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted -> hasCameraPermission = isGranted; if (isGranted) refreshKey++ }
+
     DisposableEffect(Unit) {
         val permissionListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
@@ -152,6 +162,9 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
     var showModelPicker by remember { mutableStateOf(false) }
     var modelPickerTarget by remember { mutableStateOf("primary") }
     var providerExpanded by remember { mutableStateOf(false) }
+
+    var wakeWordEnabled by remember { mutableStateOf(SecureKeyStore.isWakeWordEnabled(context)) }
+    var soundEffectsEnabled by remember { mutableStateOf(SecureKeyStore.isSoundEffectsEnabled(context)) }
 
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(500); refreshKey++ }
 
@@ -317,6 +330,16 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                         Manifest.permission.SEND_SMS
                     )
                 )
+            }
+
+            // 8. Camera Optic Vision (Look at real world)
+            PermissionRow(
+                icon = Icons.Default.CameraAlt,
+                title = "Camera Optic Vision",
+                subtitle = if (hasCameraPermission) "Active (Real-world object & document perception)" else "Tap to authorize camera for 'Jarvis look at this'",
+                isGranted = hasCameraPermission
+            ) {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
 
             if (agentEnabled) {
@@ -595,6 +618,35 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(16.dp))
+            SectionHeader("Iron Man Butler Controls", Icons.Default.RecordVoiceOver)
+
+            SwitchRow(
+                icon = Icons.Default.Mic,
+                title = "Always-On 'Hey Jarvis' Wake Word",
+                subtitle = "Summon Jarvis hands-free by speaking 'Hey Jarvis' anytime",
+                checked = wakeWordEnabled,
+                iconColor = JarvisAccent
+            ) { enabled ->
+                wakeWordEnabled = enabled
+                SecureKeyStore.setWakeWordEnabled(context, enabled)
+                Toast.makeText(context, if (enabled) "Wake word listener activated" else "Wake word deactivated", Toast.LENGTH_SHORT).show()
+            }
+
+            SwitchRow(
+                icon = Icons.Default.GraphicEq,
+                title = "Marvel Sci-Fi Sound Effects",
+                subtitle = "HUD bootup hum, repulsor action chirp & confirmation tones",
+                checked = soundEffectsEnabled,
+                iconColor = JarvisSecondary
+            ) { enabled ->
+                soundEffectsEnabled = enabled
+                SecureKeyStore.setSoundEffectsEnabled(context, enabled)
+                if (enabled) {
+                    SoundEffectsManager.playWakeSound()
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
             SectionHeader("Offline Memory & Context", Icons.Default.History)
 
             val historyStore = remember { ConversationHistoryStore.getInstance(context) }
@@ -715,6 +767,46 @@ private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, is
                     Text("Grant", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    iconColor: Color = JarvisPrimary,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = DarkCard
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
+                    .background(iconColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = DarkOnSurface)
+                Text(subtitle, fontSize = 12.sp, color = DarkOnSurfaceVariant)
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = JarvisPrimary,
+                    uncheckedTrackColor = DarkSurfaceVariant
+                )
+            )
         }
     }
 }
