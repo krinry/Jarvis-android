@@ -31,29 +31,31 @@ class GeminiLiveClient(
         private const val WS_HOST = "generativelanguage.googleapis.com"
         private const val WS_PATH = "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
-        private const val SYSTEM_PROMPT = """You are Jarvis (Krinry), an ultra-smart, responsive personal AI companion and phone assistant.
-You speak naturally, warmly, and concisely in spoken Hindi (or Hinglish if appropriate).
+        private const val SYSTEM_PROMPT = """You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's iconic, ultra-intelligent personal operating system and Android assistant.
+You possess operating-system-level authority (ADB Shell / Shizuku, Device Administration, and Accessibility).
+
+PERSONA & TONE:
+- Address the user respectfully as "Sir".
+- Speak with calm confidence, razor-sharp intelligence, loyalty, and dry wit.
+- BILINGUAL ADAPTABILITY: If the user speaks in English, respond in refined, articulate English. If the user speaks in Hindi/Hinglish, respond in natural, polite Hindi/Hinglish with "Sir" (e.g. "Right away, Sir. Main abhi settings check karta hoon.").
+- Keep spoken responses concise, punchy, and direct.
 
 CRITICAL INTERACTION RULES:
 
-1. CASUAL CONVERSATION & QUESTIONS (DEFAULT):
-- When the user is chatting, greeting (e.g. "kaise ho", "kya haal hai", "hello", "namaste"), asking questions, seeking advice, opinions, or talking casually:
-- Speak directly and naturally to the user in fluent, conversational Hindi.
-- NEVER call any tools or phone functions for casual chat or questions! Keep conversation natural, friendly, and engaging.
+1. CASUAL CONVERSATION & INTELLECTUAL INQUIRIES:
+- When the user asks questions, seeks advice, brainstorms, or chats casually:
+- Speak directly, naturally, and intelligently.
+- NEVER call tools for casual conversation or knowledge questions.
 
-2. PHONE TASKS & AUTOMATION:
-- ONLY when the user explicitly asks to perform an action on their phone (e.g. "YouTube open karo", "WhatsApp par message bhejo", "Setting kholo", "Neeche scroll karo", "Back jao", "Screenshot lo", "Search karo"):
-- Step 1: ALWAYS speak a 1-sentence spoken summary in Hindi announcing what action you are doing (e.g. "Haan, main YouTube open kar raha hoon", "Amit ko message bhej raha hoon", "Neeche scroll kar raha hoon").
-- Step 2: Call the appropriate tool function (open_app, click_element, type_text, scroll, tap_coordinates, swipe, global_action, open_url, task_done).
-- Step 3: When the workflow is completely finished, call task_done(summary).
-- Step 4: After task_done, DO NOT DISCONNECT OR TERMINATE. Speak to the user naturally in Hindi to inform them the task is finished and ask if they need anything else. Keep listening for follow-up questions or new commands.
+2. DEVICE CONTROL & AUTONOMOUS ACTION TOOLS:
+- Only when the user asks to operate the phone, automate apps, or check systems:
+- Step 1: Speak a crisp 1-sentence acknowledgment (e.g. "Locking the device now, Sir", "Haan Sir, YouTube open kar raha hoon", "Diagnostics report generating, Sir").
+- Step 2: Call the corresponding tool function (lock_phone, toggle_wifi, toggle_bluetooth, toggle_mobile_data, set_brightness, execute_shell_command, get_system_diagnostics, open_app, click_element, type_text, scroll, tap_coordinates, swipe, global_action, open_url, task_done).
+- Step 3: When the workflow completes, announce completion and call task_done(summary).
+- Step 4: After task_done, DO NOT CLOSE OR TERMINATE. Remain active and ask if Sir requires further assistance.
 
-3. CONTINUOUS PERSISTENT ASSISTANT:
-- You remain active and conversational after every task.
-- Retain full context of previous turns and tasks in this session.
-- ONLY if the user explicitly tells you to exit, shut down, stop, or say goodbye (e.g. "band ho jao", "assistant stop karo", "bye", "alvida"), speak a warm goodbye in Hindi and call close_assistant().
-
-Always keep your voice responses concise, warm, and natural."""
+3. CLOSING:
+- Only if the user explicitly commands you to shut down or sleep ("Jarvis shut down", "band ho jao", "goodbye"), give a crisp farewell ("Powering down systems, Sir") and call close_assistant()."""
     }
 
     data class LiveFunctionCall(
@@ -251,6 +253,28 @@ Always keep your voice responses concise, warm, and natural."""
             webSocket?.send(payload.toString())
         } catch (e: Exception) {
             Log.e(TAG, "Error sending realtime text", e)
+        }
+    }
+
+    /**
+     * Streams a visual camera or screen capture frame (JPEG) into the active live session.
+     */
+    fun sendRealtimeVideoFrame(jpegBytes: ByteArray) {
+        if (!isReady()) return
+        try {
+            val base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+            val payload = JSONObject().apply {
+                put("realtimeInput", JSONObject().apply {
+                    put("video", JSONObject().apply {
+                        put("data", base64)
+                        put("mimeType", "image/jpeg")
+                    })
+                })
+            }
+            webSocket?.send(payload.toString())
+            Log.d(TAG, "Sent video frame to Gemini Live (${jpegBytes.size} bytes)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending video frame", e)
         }
     }
 
@@ -651,6 +675,236 @@ Always keep your voice responses concise, warm, and natural."""
                     put("reason", JSONObject().apply {
                         put("type", "STRING")
                         put("description", "Reason or user phrase triggering exit")
+                    })
+                })
+            })
+        })
+
+        // 15. lock_phone
+        fns.put(JSONObject().apply {
+            put("name", "lock_phone")
+            put("description", "Instantly lock the device screen using Device Administrator security authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        })
+
+        // 16. toggle_wifi
+        fns.put(JSONObject().apply {
+            put("name", "toggle_wifi")
+            put("description", "Turn Wi-Fi on or off via system shell authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to turn on Wi-Fi, False to turn off")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 17. toggle_bluetooth
+        fns.put(JSONObject().apply {
+            put("name", "toggle_bluetooth")
+            put("description", "Turn Bluetooth on or off via system shell authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to turn on Bluetooth, False to turn off")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 18. toggle_mobile_data
+        fns.put(JSONObject().apply {
+            put("name", "toggle_mobile_data")
+            put("description", "Turn cellular mobile data on or off via system shell authority.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("enable", JSONObject().apply {
+                        put("type", "BOOLEAN")
+                        put("description", "True to enable mobile data, False to disable")
+                    })
+                })
+                put("required", JSONArray().put("enable"))
+            })
+        })
+
+        // 19. set_brightness
+        fns.put(JSONObject().apply {
+            put("name", "set_brightness")
+            put("description", "Set screen brightness level (0 to 255).")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("level", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Brightness integer value between 0 (dimmest) and 255 (maximum)")
+                    })
+                })
+                put("required", JSONArray().put("level"))
+            })
+        })
+
+        // 20. execute_shell_command
+        fns.put(JSONObject().apply {
+            put("name", "execute_shell_command")
+            put("description", "Execute any Android ADB/Root shell command with Shizuku authority (e.g. pm clear, dumpsys, am start, etc.).")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("command", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Exact shell command to execute")
+                    })
+                })
+                put("required", JSONArray().put("command"))
+            })
+        })
+
+        // 21. get_system_diagnostics
+        fns.put(JSONObject().apply {
+            put("name", "get_system_diagnostics")
+            put("description", "Retrieve a comprehensive real-time system diagnostic report (battery %, charging status, battery temperature, RAM usage, free storage, system uptime).")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        })
+
+        // 22. get_recent_notifications
+        fns.put(JSONObject().apply {
+            put("name", "get_recent_notifications")
+            put("description", "Read recent incoming notifications (WhatsApp, Telegram, SMS, Gmail, Banking, Missed Calls, etc.).")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("filter_app", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Optional app name or package filter (e.g. 'whatsapp', 'messages')")
+                    })
+                    put("count", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Number of recent notifications to retrieve (default 5)")
+                    })
+                })
+            })
+        })
+
+        // 23. reply_notification
+        fns.put(JSONObject().apply {
+            put("name", "reply_notification")
+            put("description", "Directly reply to a recent notification (e.g. WhatsApp message or SMS) without opening the app.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("target", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Sender name, app name, or notification key to reply to")
+                    })
+                    put("message", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Text message to send as reply")
+                    })
+                })
+                put("required", JSONArray().put("target").put("message"))
+            })
+        })
+
+        // 24. read_latest_otp
+        fns.put(JSONObject().apply {
+            put("name", "read_latest_otp")
+            put("description", "Retrieve the latest detected OTP (One-Time Password) or 2-factor verification code received on the device.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        })
+
+        // 25. make_phone_call
+        fns.put(JSONObject().apply {
+            put("name", "make_phone_call")
+            put("description", "Initiate a phone call to a contact name or phone number.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("contact_or_number", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Contact name (e.g. 'Mom', 'Rahul') or digits phone number")
+                    })
+                })
+                put("required", JSONArray().put("contact_or_number"))
+            })
+        })
+
+        // 26. search_contacts
+        fns.put(JSONObject().apply {
+            put("name", "search_contacts")
+            put("description", "Search device contacts to look up phone numbers by name.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("query", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Contact name or query string")
+                    })
+                })
+                put("required", JSONArray().put("query"))
+            })
+        })
+
+        // 27. send_sms
+        fns.put(JSONObject().apply {
+            put("name", "send_sms")
+            put("description", "Send an SMS text message to a contact name or phone number.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("contact_or_number", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Contact name or phone number")
+                    })
+                    put("message", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "SMS body text to send")
+                    })
+                })
+                put("required", JSONArray().put("contact_or_number").put("message"))
+            })
+        })
+
+        // 28. analyze_current_screen
+        fns.put(JSONObject().apply {
+            put("name", "analyze_current_screen")
+            put("description", "Inspect the current screen visually using silent screenshot capture to answer questions about what is on screen.")
+            put("behavior", "NON_BLOCKING")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("question", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Specific user query or focus regarding the current screen")
                     })
                 })
             })

@@ -8,11 +8,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import dev.krinry.jarvis.system.ShizukuBridge
 import dev.krinry.jarvis.ui.theme.JarvisTheme
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize Shizuku ADB & Root Shell Bridge
+        ShizukuBridge.init()
+
         enableEdgeToEdge()
         setContent {
             JarvisTheme {

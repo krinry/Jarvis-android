@@ -8,10 +8,18 @@ import android.util.Log
 import dev.krinry.jarvis.ai.AudioTrackPlayer
 import dev.krinry.jarvis.ai.GeminiLiveClient
 import dev.krinry.jarvis.data.ConversationHistoryStore
+import dev.krinry.jarvis.receiver.JarvisDeviceAdminReceiver
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
+import dev.krinry.jarvis.service.JarvisNotificationListenerService
+import dev.krinry.jarvis.system.ShizukuBridge
+import dev.krinry.jarvis.system.SystemTelemetry
+import dev.krinry.jarvis.system.TelecomBridge
 import kotlinx.coroutines.*
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -374,17 +382,8 @@ CRITICAL OPERATING GUIDELINES:
         flushTranscriptsToHistory()
 
         val service = AutoAgentService.instance
-        if (service == null) {
-            val errObj = JSONObject().apply {
-                put("status", "error")
-                put("message", "AutoAgentService accessibility service not running")
-            }
-            liveClient?.sendToolResponse(call.id, call.name, errObj)
-            return
-        }
-
-        val rootNode = service.getRootNode()
-        val currentNodes = UiTreeExtractor.extractTree(rootNode)
+        val rootNode = service?.getRootNode()
+        val currentNodes = if (rootNode != null) UiTreeExtractor.extractTree(rootNode) else emptyList()
         val args = call.args
 
         val actionSummary = getHindiActionName(call.name, args)
@@ -411,8 +410,8 @@ CRITICAL OPERATING GUIDELINES:
             onThinkingChanged?.invoke(false)
 
             delay(300)
-            val freshRoot = service.getRootNode()
-            val freshNodes = UiTreeExtractor.extractTree(freshRoot)
+            val freshRoot = service?.getRootNode()
+            val freshNodes = if (freshRoot != null) UiTreeExtractor.extractTree(freshRoot) else emptyList()
             val freshUiJson = UiTreeExtractor.toJson(freshNodes)
 
             val responseObj = JSONObject().apply {
@@ -642,6 +641,136 @@ CRITICAL OPERATING GUIDELINES:
             "read_screen" -> {
                 "✅ Screen read ho gaya"
             }
+            "lock_phone" -> {
+                val ok = JarvisDeviceAdminReceiver.lockDevice(context)
+                if (ok) "✅ Phone locked, Sir"
+                else {
+                    if (ShizukuBridge.hasShizukuPermission()) {
+                        ShizukuBridge.keyEvent(26)
+                        "✅ Phone screen locked via shell, Sir"
+                    } else {
+                        "❌ Lock requires Device Administrator or Shizuku authority"
+                    }
+                }
+            }
+            "toggle_wifi" -> {
+                val enable = args.optBoolean("enable", true)
+                if (ShizukuBridge.hasShizukuPermission()) {
+                    val ok = ShizukuBridge.toggleWifi(enable)
+                    if (ok) "✅ Wi-Fi ${if (enable) "enabled" else "disabled"}, Sir" else "❌ Failed to toggle Wi-Fi"
+                } else {
+                    "❌ Wi-Fi control requires Shizuku authority"
+                }
+            }
+            "toggle_bluetooth" -> {
+                val enable = args.optBoolean("enable", true)
+                if (ShizukuBridge.hasShizukuPermission()) {
+                    val ok = ShizukuBridge.toggleBluetooth(enable)
+                    if (ok) "✅ Bluetooth ${if (enable) "enabled" else "disabled"}, Sir" else "❌ Failed to toggle Bluetooth"
+                } else {
+                    "❌ Bluetooth control requires Shizuku authority"
+                }
+            }
+            "toggle_mobile_data" -> {
+                val enable = args.optBoolean("enable", true)
+                if (ShizukuBridge.hasShizukuPermission()) {
+                    val ok = ShizukuBridge.toggleMobileData(enable)
+                    if (ok) "✅ Mobile data ${if (enable) "enabled" else "disabled"}, Sir" else "❌ Failed to toggle mobile data"
+                } else {
+                    "❌ Mobile data control requires Shizuku authority"
+                }
+            }
+            "set_brightness" -> {
+                val level = args.optInt("level", 128)
+                if (ShizukuBridge.hasShizukuPermission()) {
+                    val ok = ShizukuBridge.setBrightness(level)
+                    if (ok) "✅ Brightness set to $level, Sir" else "❌ Failed to set brightness"
+                } else {
+                    "❌ Brightness control requires Shizuku authority"
+                }
+            }
+            "execute_shell_command" -> {
+                val cmd = args.optString("command")
+                if (ShizukuBridge.hasShizukuPermission()) {
+                    val res = ShizukuBridge.executeShell(cmd)
+                    if (res.isSuccess) "✅ Shell output: ${res.stdout.take(300)}"
+                    else "❌ Shell error (${res.exitCode}): ${res.stderr.take(200)}"
+                } else {
+                    "❌ Shell commands require Shizuku authority"
+                }
+            }
+            "get_system_diagnostics" -> {
+                SystemTelemetry.getDiagnosticsSummary(context)
+            }
+            "get_recent_notifications" -> {
+                if (!JarvisNotificationListenerService.isNotificationAccessGranted(context)) {
+                    "❌ Notification access is not granted, Sir. Please enable Notification Listener in Jarvis settings."
+                } else {
+                    val filterApp = args.optString("filter_app").takeIf { it.isNotBlank() }
+                    val count = args.optInt("count", 5).coerceIn(1, 20)
+                    val notifications = JarvisNotificationListenerService.getRecent(filterApp, count)
+                    if (notifications.isEmpty()) {
+                        "Sir, no notifications found${if (filterApp != null) " for $filterApp" else ""}."
+                    } else {
+                        val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+                        val sb = StringBuilder("Recent notifications:\n")
+                        notifications.forEachIndexed { idx, n ->
+                            val time = sdf.format(Date(n.timestamp))
+                            sb.append("${idx + 1}. [${n.appName}] ${n.title}: ${n.text} ($time)\n")
+                        }
+                        sb.toString().trim()
+                    }
+                }
+            }
+            "reply_notification" -> {
+                val target = args.optString("target")
+                val msg = args.optString("message")
+                if (!JarvisNotificationListenerService.isNotificationAccessGranted(context)) {
+                    "❌ Notification access required to send inline reply, Sir."
+                } else {
+                    val ok = JarvisNotificationListenerService.replyTo(target, msg, context)
+                    if (ok) "✅ Reply transmitted to $target: \"$msg\", Sir"
+                    else "❌ Could not send direct reply to $target. App may not support inline reply."
+                }
+            }
+            "read_latest_otp" -> {
+                val otp = JarvisNotificationListenerService.getLatestOtpCode()
+                if (otp != null) {
+                    "✅ Latest OTP: ${otp.code} from ${otp.sender}. Message: \"${otp.messageSnippet}\""
+                } else {
+                    "Sir, no active OTP was detected in notifications in the last 15 minutes."
+                }
+            }
+            "make_phone_call" -> {
+                val target = args.optString("contact_or_number")
+                TelecomBridge.makePhoneCall(context, target)
+            }
+            "search_contacts" -> {
+                val query = args.optString("query")
+                val matches = TelecomBridge.searchContacts(context, query)
+                if (matches.isEmpty()) {
+                    "No contacts found matching '$query', Sir."
+                } else {
+                    val list = matches.joinToString(", ") { "${it.name}: ${it.phoneNumber}" }
+                    "Found contacts: $list"
+                }
+            }
+            "send_sms" -> {
+                val target = args.optString("contact_or_number")
+                val msg = args.optString("message")
+                TelecomBridge.sendSms(context, target, msg)
+            }
+            "analyze_current_screen" -> {
+                val question = args.optString("question", "What is displayed on the screen?")
+                val jpegBytes = ShizukuBridge.silentScreenshotJpeg(quality = 75, maxDimension = 1080)
+                if (jpegBytes != null) {
+                    liveClient?.sendRealtimeVideoFrame(jpegBytes)
+                    "✅ Visual screen frame captured and transmitted to your vision feed, Sir. Analysis focus: $question"
+                } else {
+                    val freshText = currentNodes.filter { it.text.isNotBlank() }.joinToString(" | ") { it.text }
+                    "Visual screencap unavailable. Screen elements: ${freshText.take(300)}"
+                }
+            }
             else -> {
                 "❓ Unknown function: ${call.name}"
             }
@@ -651,8 +780,8 @@ CRITICAL OPERATING GUIDELINES:
         delay(400)
 
         // Nayi screen padho aur response bhejo
-        val freshRoot = service.getRootNode()
-        val freshNodes = UiTreeExtractor.extractTree(freshRoot)
+        val freshRoot = service?.getRootNode()
+        val freshNodes = if (freshRoot != null) UiTreeExtractor.extractTree(freshRoot) else emptyList()
         val freshUiJson = UiTreeExtractor.toJson(freshNodes)
 
         val responseObj = JSONObject().apply {
@@ -666,22 +795,36 @@ CRITICAL OPERATING GUIDELINES:
 
     private fun getHindiActionName(name: String, args: JSONObject): String {
         return when (name) {
-            "open_app" -> "${args.optString("appName")} open kar raha hoon"
+            "open_app" -> "${args.optString("appName")} open kar raha hoon, Sir"
             "click_element" -> {
                 val label = args.optString("text").takeIf { it.isNotBlank() } ?: "element"
-                "$label par click kar raha hoon"
+                "$label par click kar raha hoon, Sir"
             }
-            "type_text" -> "${args.optString("text")} type kar raha hoon"
-            "scroll" -> "Screen ${if (args.optString("direction").equals("up", ignoreCase = true)) "upar" else "neeche"} scroll kar raha hoon"
-            "tap_coordinates" -> "Screen par tap kar raha hoon"
-            "swipe" -> "Swipe kar raha hoon"
-            "global_action" -> "${args.optString("action")} button daba raha hoon"
-            "open_url" -> "Link khol raha hoon: ${args.optString("url")}"
-            "take_screenshot" -> "Screenshot le raha hoon"
-            "clipboard_action" -> "Clipboard action kar raha hoon"
-            "read_screen" -> "Screen inspect kar raha hoon"
-            "task_done" -> args.optString("summary", "Kaam poora ho gaya!")
-            "close_assistant" -> "Assistant session band kar raha hoon"
+            "type_text" -> "${args.optString("text")} type kar raha hoon, Sir"
+            "scroll" -> "Screen ${if (args.optString("direction").equals("up", ignoreCase = true)) "upar" else "neeche"} scroll kar raha hoon, Sir"
+            "tap_coordinates" -> "Screen par tap kar raha hoon, Sir"
+            "swipe" -> "Swipe kar raha hoon, Sir"
+            "global_action" -> "${args.optString("action")} button daba raha hoon, Sir"
+            "open_url" -> "Link open kar raha hoon: ${args.optString("url")}"
+            "take_screenshot" -> "Screenshot capture kar raha hoon, Sir"
+            "clipboard_action" -> "Clipboard action kar raha hoon, Sir"
+            "read_screen" -> "Screen inspect kar raha hoon, Sir"
+            "lock_phone" -> "Phone lock kar raha hoon, Sir"
+            "toggle_wifi" -> "Wi-Fi ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "toggle_bluetooth" -> "Bluetooth ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "toggle_mobile_data" -> "Mobile data ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "set_brightness" -> "Brightness adjust kar raha hoon, Sir"
+            "execute_shell_command" -> "System command run kar raha hoon, Sir: ${args.optString("command")}"
+            "get_system_diagnostics" -> "System telemetry and diagnostics inspect kar raha hoon, Sir"
+            "get_recent_notifications" -> "Notifications check kar raha hoon, Sir"
+            "reply_notification" -> "${args.optString("target")} ko reply bhej raha hoon, Sir"
+            "read_latest_otp" -> "Latest OTP check kar raha hoon, Sir"
+            "make_phone_call" -> "${args.optString("contact_or_number")} ko call mila raha hoon, Sir"
+            "search_contacts" -> "Contacts search kar raha hoon, Sir"
+            "send_sms" -> "${args.optString("contact_or_number")} ko SMS bhej raha hoon, Sir"
+            "analyze_current_screen" -> "Screen visually inspect kar raha hoon, Sir"
+            "task_done" -> args.optString("summary", "Kaam poora ho gaya, Sir!")
+            "close_assistant" -> "Assistant session band kar raha hoon, Sir"
             else -> name
         }
     }

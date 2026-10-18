@@ -93,6 +93,11 @@ dependencies {
     // Material icons
     implementation("androidx.compose.material:material-icons-extended")
 
+    // Shizuku API (ADB / Root Shell Bridge)
+    val shizukuVersion = "13.1.5"
+    implementation("dev.rikka.shizuku:api:$shizukuVersion")
+    implementation("dev.rikka.shizuku:provider:$shizukuVersion")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
