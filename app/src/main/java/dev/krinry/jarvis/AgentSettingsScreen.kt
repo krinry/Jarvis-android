@@ -732,7 +732,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(40.dp))
-            Text("Jarvis v1.2 • with Gemini Live API", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
+            Text("Jarvis • Made by krinry • with Gemini Live API", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
             Spacer(Modifier.height(24.dp))
         }
     }

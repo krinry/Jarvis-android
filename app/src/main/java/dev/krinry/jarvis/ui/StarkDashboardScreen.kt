@@ -124,14 +124,18 @@ fun StarkDashboardScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
         // =====================================================================
-        // === 1. TOP STARK STATUS HEADER ===
+        // === 1. TOP KRINRY STATUS HEADER ===
         // =====================================================================
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(end = 8.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -141,46 +145,73 @@ fun StarkDashboardScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "STARK INDUSTRIES",
+                        text = "KRINRY",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.5.sp,
-                        color = StarkCyan
+                        letterSpacing = 2.sp,
+                        color = StarkCyan,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "• MADE BY KRINRY",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp,
+                        color = StarkGold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "J.A.R.V.I.S. OS // MARK LXXXV",
-                    fontSize = 13.sp,
+                    text = "JARVIS BY KRINRY",
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 1.5.sp,
-                    color = DarkOnSurface
+                    color = DarkOnSurface,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
-            // Right telemetry chip
+            // Right telemetry chip (guaranteed no wrapping)
             Surface(
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = DarkCard,
                 border = BorderStroke(1.dp, DarkCardBorder)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
                         text = currentTime,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = StarkCyan
+                        color = StarkCyan,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(11.dp)
+                            .background(DarkCardBorder)
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = "${telemetry.batteryLevel}%",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (telemetry.batteryLevel > 20) StarkGreen else StarkRed
+                        color = if (telemetry.batteryLevel > 20) StarkGreen else StarkRed,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -445,7 +476,19 @@ fun StarkDashboardScreen(
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            text = "⚡ JARVIS • MADE BY KRINRY",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp,
+            color = StarkCyan.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
