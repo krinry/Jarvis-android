@@ -38,7 +38,13 @@ import androidx.core.app.NotificationCompat
 import dev.krinry.jarvis.MainActivity
 import dev.krinry.jarvis.R
 import dev.krinry.jarvis.agent.AgentLlmEngine
+import dev.krinry.jarvis.agent.GeminiLiveEngine
 import dev.krinry.jarvis.ai.GroqApiClient
+import dev.krinry.jarvis.audio.SoundEffectsManager
+import dev.krinry.jarvis.audio.WakeWordDetector
+import dev.krinry.jarvis.security.SecureKeyStore
+import dev.krinry.jarvis.system.HardwareControlBridge
+import dev.krinry.jarvis.ui.ArcReactorView
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
@@ -84,8 +90,11 @@ class FloatingBubbleService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
+    private var arcReactorView: ArcReactorView? = null
     private var subtitleView: View? = null
     private var agentEngine: AgentLlmEngine? = null
+    private var geminiLiveEngine: GeminiLiveEngine? = null
+    private var wakeWordDetector: WakeWordDetector? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var isListening = false
@@ -110,6 +119,8 @@ class FloatingBubbleService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        SoundEffectsManager.init(applicationContext)
+
         agentEngine = AgentLlmEngine(applicationContext)
         agentEngine?.onStatusUpdate = { status ->
             scope.launch(Dispatchers.Main) {
@@ -119,13 +130,91 @@ class FloatingBubbleService : Service() {
                     stopThinkingAnimation()
                     playCompletionSound()
                     vibratePattern(longArrayOf(0, 80, 60, 80)) // success pattern
+                    wakeWordDetector?.resume()
                 } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
                     isProcessingCommand = false
                     stopThinkingAnimation()
                     vibrateShort()
+                    wakeWordDetector?.resume()
                 }
             }
         }
+
+        // Initialize Gemini Live Engine
+        geminiLiveEngine = GeminiLiveEngine(applicationContext).apply {
+            onStatusUpdate = { status ->
+                scope.launch(Dispatchers.Main) {
+                    addSubtitle(status)
+                    if (status.startsWith("⚡")) {
+                        arcReactorView?.setState(ArcReactorView.State.SPEAKING)
+                    } else if (status.startsWith("🗣️")) {
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                    } else if (status.startsWith("✅")) {
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                        stopThinkingAnimation()
+                        if (status.contains("Ho gaya") || status.contains("completed") || status.contains("poora")) {
+                            playCompletionSound()
+                            vibratePattern(longArrayOf(0, 80, 60, 80))
+                        }
+                    } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
+                        arcReactorView?.setState(ArcReactorView.State.IDLE)
+                        stopThinkingAnimation()
+                        vibrateShort()
+                    }
+                }
+            }
+            onThinkingChanged = { thinking ->
+                scope.launch(Dispatchers.Main) {
+                    if (thinking) {
+                        arcReactorView?.setState(ArcReactorView.State.THINKING)
+                        startThinkingAnimation()
+                    } else {
+                        if (geminiLiveEngine?.isRunning() == true) {
+                            arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                        } else {
+                            arcReactorView?.setState(ArcReactorView.State.IDLE)
+                        }
+                        stopThinkingAnimation()
+                    }
+                }
+            }
+            onSessionEnded = {
+                scope.launch(Dispatchers.Main) {
+                    arcReactorView?.setState(ArcReactorView.State.IDLE)
+                    animateBubble(false)
+                    stopThinkingAnimation()
+                    wakeWordDetector?.resume()
+                }
+            }
+        }
+
+        // Initialize background Hands-Free Wake Word detector ("Hey Jarvis")
+        wakeWordDetector = WakeWordDetector(applicationContext) { matchedKeyword ->
+            scope.launch(Dispatchers.Main) {
+                Log.d(TAG, "⚡ Wake word detected: $matchedKeyword")
+                SoundEffectsManager.playWakeSound()
+                vibratePattern(longArrayOf(0, 80, 50, 80))
+                addSubtitle("⚡ Wake word: \"$matchedKeyword\"")
+
+                val mode = SecureKeyStore.getEngineMode(applicationContext)
+                if (mode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
+                    if (geminiLiveEngine?.isRunning() != true) {
+                        wakeWordDetector?.pause()
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                        animateBubble(true)
+                        geminiLiveEngine?.startSession()
+                    }
+                } else {
+                    if (!isListening && !isProcessingCommand) {
+                        wakeWordDetector?.pause()
+                        startWhisperRecording()
+                    }
+                }
+            }
+        }.apply {
+            start()
+        }
+
         isRunning = true
         startForegroundNotification()
     }
@@ -140,7 +229,12 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        wakeWordDetector?.stop()
+        wakeWordDetector = null
+        SoundEffectsManager.release()
         scope.cancel()
+        geminiLiveEngine?.stopSession()
+        geminiLiveEngine = null
         stopRecording()
         stopThinkingAnimation()
         releaseWakeLock()
@@ -203,20 +297,11 @@ class FloatingBubbleService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        val bubbleSize = dpToPx(54)
-        val bubble = FrameLayout(this).apply {
-            background = createBubbleDrawable()
-            elevation = dpToPx(8).toFloat()
+        val bubbleSize = dpToPx(58)
+        val arcReactor = ArcReactorView(this).apply {
+            elevation = dpToPx(10).toFloat()
         }
-
-        val icon = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_btn_speak_now)
-            val padding = dpToPx(13)
-            setPadding(padding, padding, padding, padding)
-        }
-        bubble.addView(icon, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
-        ))
+        arcReactorView = arcReactor
 
         val bubbleParams = WindowManager.LayoutParams(
             bubbleSize, bubbleSize, overlayType,
@@ -234,7 +319,7 @@ class FloatingBubbleService : Service() {
         val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
         val longPressRunnable = Runnable { if (!isMoved) { vibrateShort(); showBubbleMenu() } }
 
-        bubble.setOnTouchListener { _, event ->
+        arcReactor.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = bubbleParams.x; initialY = bubbleParams.y
@@ -253,7 +338,7 @@ class FloatingBubbleService : Service() {
                         }
                     }
                     bubbleParams.x = initialX + dx; bubbleParams.y = initialY + dy
-                    windowManager.updateViewLayout(bubble, bubbleParams); true
+                    windowManager.updateViewLayout(arcReactor, bubbleParams); true
                 }
                 MotionEvent.ACTION_UP -> {
                     longPressHandler.removeCallbacks(longPressRunnable)
@@ -277,8 +362,8 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        windowManager.addView(bubble, bubbleParams)
-        bubbleView = bubble
+        windowManager.addView(arcReactor, bubbleParams)
+        bubbleView = arcReactor
 
         // === Subtitle overlay ===
         val subtitleContainer = LinearLayout(this).apply {
@@ -317,27 +402,106 @@ class FloatingBubbleService : Service() {
     // === Long-Press Menu ===
     // =========================================================================
 
+    // =========================================================================
+    // === Long-Press Stark HUD Quick Controls Menu ===
+    // =========================================================================
+
     private fun showBubbleMenu() {
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        val menuItems = mutableListOf<String>()
-        menuItems.add("🔄 Repeat Last Command")
-        menuItems.add("🗑️ Clear Subtitles")
-        menuItems.add(if (keepScreenOn) "🌙 Screen: Auto-off" else "☀️ Screen: Always On")
-        menuItems.add("❌ Close Jarvis")
-
         val menuLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                setColor(0xF0141428.toInt())
+                setColor(0xF5040811.toInt()) // Obsidian Black
                 cornerRadius = dpToPx(16).toFloat()
-                setStroke(dpToPx(1), 0x40FFFFFF)
+                setStroke(dpToPx(1.5f.toInt()), 0xFF00F0FF.toInt()) // Stark Arc Cyan Border
             }
-            elevation = dpToPx(16).toFloat()
+            elevation = dpToPx(20).toFloat()
+        }
+
+        // Header
+        val header = TextView(this).apply {
+            text = "⬡ KRINRY • JARVIS HUD"
+            textSize = 12f
+            setTextColor(0xFF00F0FF.toInt())
+            typeface = Typeface.create("monospace", Typeface.BOLD)
+            setPadding(dpToPx(14), dpToPx(4), dpToPx(14), dpToPx(12))
+            letterSpacing = 0.15f
+        }
+        menuLayout.addView(header)
+
+        // Divider
+        val divider = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)).apply {
+                bottomMargin = dpToPx(8)
+            }
+            setBackgroundColor(0x3300F0FF.toInt())
+        }
+        menuLayout.addView(divider)
+
+        data class MenuItem(val label: String, val onClick: () -> Unit)
+
+        val items = mutableListOf<MenuItem>()
+
+        // 1. Torch Toggle
+        val isTorch = HardwareControlBridge.isTorchActive()
+        items.add(MenuItem(if (isTorch) "🔦 Flashlight: Active (Tap to turn OFF)" else "🔦 Flashlight: Inactive (Tap to turn ON)") {
+            val (ok, msg) = HardwareControlBridge.toggleTorch(applicationContext, !isTorch)
+            addSubtitle(if (ok) "⚡ $msg" else "❌ $msg")
+            vibrateShort()
+        })
+
+        // 2. Hotspot Toggle
+        items.add(MenuItem("📶 Hotspot: Quick Toggle") {
+            scope.launch {
+                addSubtitle("⚡ Toggling Hotspot, Sir...")
+                val (ok, msg) = HardwareControlBridge.toggleHotspot(applicationContext, true)
+                addSubtitle(if (ok) "✅ $msg" else "❌ $msg")
+                vibrateShort()
+            }
+        })
+
+        // 3. Screen Always-On
+        items.add(MenuItem(if (keepScreenOn) "🌙 Screen: Auto-off" else "☀️ Screen: Always On") {
+            toggleKeepScreenOn()
+            vibrateShort()
+        })
+
+        // 4. Repeat Command
+        items.add(MenuItem("🔄 Repeat Last Command") {
+            repeatLastCommand()
+            vibrateShort()
+        })
+
+        // 5. Clear HUD Subtitles
+        items.add(MenuItem("🗑️ Clear HUD Log") {
+            clearSubtitles()
+            vibrateShort()
+        })
+
+        // 6. Close Jarvis
+        items.add(MenuItem("❌ Power Down Jarvis") {
+            vibrateShort()
+            stopSelf()
+        })
+
+        items.forEach { item ->
+            val tv = TextView(this).apply {
+                text = item.label
+                textSize = 14f
+                setTextColor(0xFFE2E8F0.toInt())
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setPadding(dpToPx(14), dpToPx(10), dpToPx(14), dpToPx(10))
+                setOnClickListener {
+                    try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
+                    item.onClick()
+                }
+            }
+            menuLayout.addView(tv)
         }
 
         val menuParams = WindowManager.LayoutParams(
@@ -347,25 +511,6 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.CENTER }
 
-        menuItems.forEachIndexed { index, item ->
-            val tv = TextView(this).apply {
-                text = item
-                textSize = 16f
-                setTextColor(0xFFFFFFFF.toInt())
-                setPadding(dpToPx(20), dpToPx(14), dpToPx(20), dpToPx(14))
-                setOnClickListener {
-                    try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
-                    when (index) {
-                        0 -> repeatLastCommand()
-                        1 -> clearSubtitles()
-                        2 -> toggleKeepScreenOn()
-                        3 -> stopSelf()
-                    }
-                }
-            }
-            menuLayout.addView(tv)
-        }
-
         menuLayout.setOnClickListener {
             try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
         }
@@ -373,7 +518,7 @@ class FloatingBubbleService : Service() {
         windowManager.addView(menuLayout, menuParams)
 
         scope.launch {
-            delay(5000)
+            delay(6000)
             try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
         }
     }
@@ -423,6 +568,8 @@ class FloatingBubbleService : Service() {
     // === Subtitle System ===
     // =========================================================================
 
+    private var subtitleFadeJob: Job? = null
+
     private fun addSubtitle(text: String) {
         subtitleHistory.add(text)
         while (subtitleHistory.size > MAX_SUBTITLE_LINES) subtitleHistory.removeAt(0)
@@ -437,6 +584,12 @@ class FloatingBubbleService : Service() {
             }
             val tv = view.findViewWithTag<TextView>("subtitle_text")
             tv?.text = subtitleHistory.joinToString("\n")
+        }
+
+        subtitleFadeJob?.cancel()
+        subtitleFadeJob = scope.launch {
+            delay(4500)
+            clearSubtitles()
         }
     }
 
@@ -454,6 +607,27 @@ class FloatingBubbleService : Service() {
     // =========================================================================
 
     private fun onBubbleTapped() {
+        val mode = SecureKeyStore.getEngineMode(applicationContext)
+        if (mode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
+            if (geminiLiveEngine?.isRunning() == true) {
+                geminiLiveEngine?.stopSession()
+                arcReactorView?.setState(ArcReactorView.State.IDLE)
+                stopThinkingAnimation()
+                animateBubble(false)
+                vibrateShort()
+                wakeWordDetector?.resume()
+            } else {
+                wakeWordDetector?.pause()
+                SoundEffectsManager.playWakeSound()
+                vibrateShort()
+                arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                animateBubble(true)
+                geminiLiveEngine?.startSession()
+            }
+            return
+        }
+
+        // Groq Mode
         if (isProcessingCommand) {
             agentEngine?.cancelTask()
             isProcessingCommand = false
@@ -461,10 +635,16 @@ class FloatingBubbleService : Service() {
             stopThinkingAnimation()
             addSubtitle("⏹ Cancelled")
             vibrateShort()
+            wakeWordDetector?.resume()
             return
         }
-        if (isListening) stopRecordingAndProcess()
-        else startWhisperRecording()
+        if (isListening) {
+            stopRecordingAndProcess()
+        } else {
+            wakeWordDetector?.pause()
+            SoundEffectsManager.playWakeSound()
+            startWhisperRecording()
+        }
     }
 
     private fun onDoubleTap() {
@@ -512,10 +692,7 @@ class FloatingBubbleService : Service() {
 
     private fun playCompletionSound() {
         try {
-            // Use system notification sound as completion tone
-            val mp = MediaPlayer.create(this, android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
-            mp?.setOnCompletionListener { it.release() }
-            mp?.start()
+            SoundEffectsManager.playCompleteSound()
         } catch (_: Exception) {}
     }
 
@@ -700,8 +877,9 @@ class FloatingBubbleService : Service() {
 
     private fun createSubtitleBackground() = android.graphics.drawable.GradientDrawable().apply {
         shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        setColor(0xCC0A0A1A.toInt())
-        cornerRadius = dpToPx(16).toFloat()
+        setColor(0xEE040811.toInt())
+        cornerRadius = dpToPx(12).toFloat()
+        setStroke(dpToPx(1), 0x6600F0FF.toInt())
     }
 
     private fun dpToPx(dp: Int) = (dp * resources.displayMetrics.density).toInt()

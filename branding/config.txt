@@ -12,10 +12,10 @@ APP_NAME=Jarvis
 PACKAGE_NAME=dev.krinry.jarvis
 
 # Version shown to users (e.g., 1.0, 2.0-beta, 1.5.0)
-VERSION_NAME=1.0
+VERSION_NAME=2.0.0
 
 # Internal version code (must be integer, increase each release)
-VERSION_CODE=1
+VERSION_CODE=2
 
 # Minimum Android SDK level (24 = Android 7.0 Nougat)
 MIN_SDK=24
