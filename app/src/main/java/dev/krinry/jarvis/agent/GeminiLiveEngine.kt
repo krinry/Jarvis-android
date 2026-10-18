@@ -14,6 +14,7 @@ import dev.krinry.jarvis.service.AutoAgentService
 import dev.krinry.jarvis.service.JarvisNotificationListenerService
 import dev.krinry.jarvis.audio.SoundEffectsManager
 import dev.krinry.jarvis.system.CameraVisionBridge
+import dev.krinry.jarvis.system.HardwareControlBridge
 import dev.krinry.jarvis.system.ShizukuBridge
 import dev.krinry.jarvis.system.SystemTelemetry
 import dev.krinry.jarvis.system.TelecomBridge
@@ -795,6 +796,65 @@ CRITICAL OPERATING GUIDELINES:
                     "❌ Optic sensors could not access the $cameraLens camera. Camera may be in use by another app or permission is missing, Sir."
                 }
             }
+            "toggle_flashlight" -> {
+                val enable = args.optBoolean("enable", true)
+                val (ok, msg) = HardwareControlBridge.toggleTorch(context, enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "toggle_hotspot" -> {
+                val enable = args.optBoolean("enable", true)
+                val (ok, msg) = HardwareControlBridge.toggleHotspot(context, enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "set_volume" -> {
+                val stream = args.optString("stream", "media")
+                val level = if (args.has("level_percent")) args.optInt("level_percent") else null
+                val relative = if (args.has("relative_step")) args.optInt("relative_step") else null
+                val mute = if (args.has("mute")) args.optBoolean("mute") else null
+                val (ok, msg) = HardwareControlBridge.setVolume(context, stream, level, relative, mute)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "toggle_dnd" -> {
+                val enable = args.optBoolean("enable", true)
+                val (ok, msg) = HardwareControlBridge.setDnd(context, enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "toggle_auto_rotate" -> {
+                val enable = args.optBoolean("enable", true)
+                val (ok, msg) = HardwareControlBridge.toggleAutoRotate(enable)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "media_control" -> {
+                val action = args.optString("action", "play_pause")
+                val (ok, msg) = HardwareControlBridge.mediaControl(action)
+                if (ok) "✅ $msg" else "❌ $msg"
+            }
+            "device_power_control" -> {
+                val action = args.optString("action", "lock").lowercase()
+                when (action) {
+                    "reboot" -> {
+                        val (ok, msg) = HardwareControlBridge.rebootDevice()
+                        if (ok) "✅ $msg" else "❌ $msg"
+                    }
+                    "shutdown" -> {
+                        val (ok, msg) = HardwareControlBridge.shutdownDevice()
+                        if (ok) "✅ $msg" else "❌ $msg"
+                    }
+                    else -> {
+                        val (ok, msg) = HardwareControlBridge.lockDevice(context)
+                        if (ok) "✅ $msg" else "❌ $msg"
+                    }
+                }
+            }
+            "clear_app_data" -> {
+                val pkg = args.optString("package_name")
+                if (pkg.isBlank()) {
+                    "❌ Package name required"
+                } else {
+                    val (ok, msg) = HardwareControlBridge.clearAppData(pkg)
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
             else -> {
                 "❓ Unknown function: ${call.name}"
             }
@@ -851,7 +911,14 @@ CRITICAL OPERATING GUIDELINES:
             "make_phone_call" -> "${args.optString("contact_or_number")} ko call mila raha hoon, Sir"
             "search_contacts" -> "Contacts search kar raha hoon, Sir"
             "send_sms" -> "${args.optString("contact_or_number")} ko SMS bhej raha hoon, Sir"
-            "analyze_current_screen" -> "Screen visually inspect kar raha hoon, Sir"
+            "toggle_flashlight" -> "Torch ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "toggle_hotspot" -> "Hotspot ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "set_volume" -> "Volume adjust kar raha hoon, Sir"
+            "toggle_dnd" -> "Do Not Disturb ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "toggle_auto_rotate" -> "Auto-rotate ${if (args.optBoolean("enable", true)) "on" else "off"} kar raha hoon, Sir"
+            "media_control" -> "Media playback update kar raha hoon, Sir: ${args.optString("action")}"
+            "device_power_control" -> "${args.optString("action")} command execute kar raha hoon, Sir"
+            "clear_app_data" -> "${args.optString("package_name")} ka data clear kar raha hoon, Sir"
             "task_done" -> args.optString("summary", "Kaam poora ho gaya, Sir!")
             "close_assistant" -> "Assistant session band kar raha hoon, Sir"
             else -> name
