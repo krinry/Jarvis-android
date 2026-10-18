@@ -84,14 +84,13 @@ object SecureKeyStore {
 
     fun saveGeminiApiKey(context: Context, apiKey: String) {
         getEncryptedPrefs(context).edit().putString(KEY_GEMINI_API_KEY, apiKey).apply()
-        // Also save generic provider key for Gemini provider
-        saveProviderApiKey(context, "gemini", apiKey)
+        getEncryptedPrefs(context).edit().putString("provider_key_gemini", apiKey).apply()
     }
 
     fun getGeminiApiKey(context: Context): String? {
         val key = getEncryptedPrefs(context).getString(KEY_GEMINI_API_KEY, null)
         if (!key.isNullOrEmpty()) return key
-        val generic = getProviderApiKey(context, "gemini")
+        val generic = getEncryptedPrefs(context).getString("provider_key_gemini", null)
         if (!generic.isNullOrEmpty()) return generic
         return getLegacyPrefs(context).getString(KEY_GEMINI_API_KEY, null)
     }
