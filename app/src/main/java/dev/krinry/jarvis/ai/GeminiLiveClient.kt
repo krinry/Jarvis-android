@@ -304,14 +304,8 @@ CRITICAL INTERACTION RULES:
                     put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT)))
                 })
 
-                // Grounding with Google Search + 37 Client Tools
-                val toolsArray = JSONArray().apply {
-                    put(buildToolsDeclaration())
-                    put(JSONObject().apply {
-                        put("googleSearch", JSONObject())
-                    })
-                }
-                put("tools", toolsArray)
+                // 37 Client Tools
+                put("tools", JSONArray().put(buildToolsDeclaration()))
 
                 put("inputAudioTranscription", JSONObject())
                 put("outputAudioTranscription", JSONObject())
@@ -321,12 +315,12 @@ CRITICAL INTERACTION RULES:
                     put("slidingWindow", JSONObject())
                 })
 
-                // Session Resumption across network glitches
-                put("sessionResumption", JSONObject().apply {
-                    if (!lastSessionHandle.isNullOrBlank()) {
+                // Session Resumption across network glitches (only when handle exists)
+                if (!lastSessionHandle.isNullOrBlank()) {
+                    put("sessionResumption", JSONObject().apply {
                         put("handle", lastSessionHandle)
-                    }
-                })
+                    })
+                }
 
                 // Server VAD Tuning (Realtime Input Config)
                 put("realtimeInputConfig", JSONObject().apply {
