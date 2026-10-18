@@ -39,21 +39,42 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.ai.ModelInfo
 import dev.krinry.jarvis.data.ConversationHistoryStore
+import dev.krinry.jarvis.receiver.JarvisDeviceAdminReceiver
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
 import dev.krinry.jarvis.service.FloatingBubbleService
+import dev.krinry.jarvis.service.JarvisNotificationListenerService
+import dev.krinry.jarvis.system.ShizukuBridge
 import dev.krinry.jarvis.ui.theme.*
 import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
     var refreshKey by remember { mutableIntStateOf(0) }
+
+    // Auto-refresh permission status whenever user returns to the app
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshKey++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val isAccessibilityEnabled = remember(refreshKey) { checkAccessibilityEnabled(context) }
     val hasOverlayPermission = remember(refreshKey) {
@@ -67,6 +88,38 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted -> hasAudioPermission = isGranted; if (isGranted) refreshKey++ }
+
+    val isShizukuAvailable = remember(refreshKey) { ShizukuBridge.isShizukuAvailable() }
+    val hasShizukuPermission = remember(refreshKey) { ShizukuBridge.hasShizukuPermission() }
+    val isDeviceAdminActive = remember(refreshKey) { JarvisDeviceAdminReceiver.isDeviceAdminActive(context) }
+    val isNotificationAccessGranted = remember(refreshKey) { JarvisNotificationListenerService.isNotificationAccessGranted(context) }
+
+    val hasTelecomPermissions = remember(refreshKey) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    val telecomPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refreshKey++ }
+
+    DisposableEffect(Unit) {
+        val permissionListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                refreshKey++
+            }
+        }
+        val binderListener = Shizuku.OnBinderReceivedListener {
+            refreshKey++
+        }
+        ShizukuBridge.addPermissionResultListener(permissionListener)
+        try { Shizuku.addBinderReceivedListenerSticky(binderListener) } catch (_: Exception) {}
+        onDispose {
+            ShizukuBridge.removePermissionResultListener(permissionListener)
+            try { Shizuku.removeBinderReceivedListener(binderListener) } catch (_: Exception) {}
+        }
+    }
 
     var agentEnabled by remember { mutableStateOf(SecureKeyStore.isAgentEnabled(context)) }
     val allReady = isAccessibilityEnabled && hasOverlayPermission && hasAudioPermission
@@ -168,17 +221,103 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            // ===== PERMISSIONS =====
-            SectionHeader("Setup", Icons.Default.Shield)
-            PermissionRow(Icons.Default.Accessibility, "Accessibility Service", "Read screen & execute actions", isAccessibilityEnabled) {
+            // ===== IRON MAN SYSTEM AUTHORITY =====
+            SectionHeader("Iron Man System Authority", Icons.Default.Shield)
+
+            // 1. Shizuku Shell Bridge (Root / ADB power)
+            PermissionRow(
+                icon = Icons.Default.Terminal,
+                title = "Shizuku Shell Authority",
+                subtitle = when {
+                    hasShizukuPermission -> "ADB Shell access granted (Full Phone Control)"
+                    isShizukuAvailable -> "Shizuku service running • Tap to authorize"
+                    else -> "Tap to open/start Shizuku for ADB authority"
+                },
+                isGranted = hasShizukuPermission
+            ) {
+                if (isShizukuAvailable && !hasShizukuPermission) {
+                    ShizukuBridge.requestPermission()
+                } else {
+                    val shizukuIntent = context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                    if (shizukuIntent != null) {
+                        context.startActivity(shizukuIntent)
+                    } else {
+                        Toast.makeText(context, "Install & start Shizuku for full ADB phone authority", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+
+            // 2. Device Administrator
+            PermissionRow(
+                icon = Icons.Default.AdminPanelSettings,
+                title = "Device Administrator",
+                subtitle = if (isDeviceAdminActive) "Active (Instant lock & security power)" else "Tap to activate screen locking & admin policies",
+                isGranted = isDeviceAdminActive
+            ) {
+                if (!isDeviceAdminActive) {
+                    context.startActivity(JarvisDeviceAdminReceiver.createEnableAdminIntent(context))
+                } else {
+                    Toast.makeText(context, "Device Administrator is already active", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            // 3. Accessibility Service
+            PermissionRow(
+                icon = Icons.Default.Accessibility,
+                title = "Accessibility Service",
+                subtitle = "Read active screen UI tree & gestures",
+                isGranted = isAccessibilityEnabled
+            ) {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
             }
-            PermissionRow(Icons.Default.Layers, "Display Over Apps", "Floating AI bubble", hasOverlayPermission) {
+
+            // 4. Display Over Apps
+            PermissionRow(
+                icon = Icons.Default.Layers,
+                title = "Display Over Apps",
+                subtitle = "Floating Arc-Reactor HUD",
+                isGranted = hasOverlayPermission
+            ) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
                 }
             }
-            PermissionRow(Icons.Default.Mic, "Microphone", "Live voice input", hasAudioPermission) { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+
+            // 5. Microphone
+            PermissionRow(
+                icon = Icons.Default.Mic,
+                title = "Microphone",
+                subtitle = "Real-time 16kHz voice streaming",
+                isGranted = hasAudioPermission
+            ) {
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+
+            // 6. Notification Intelligence (OTP detection, Read & Reply)
+            PermissionRow(
+                icon = Icons.Default.NotificationsActive,
+                title = "Notification Intelligence",
+                subtitle = if (isNotificationAccessGranted) "Active (Inline replies, OTP interception & reading)" else "Tap to enable notification listener for messages & OTPs",
+                isGranted = isNotificationAccessGranted
+            ) {
+                context.startActivity(JarvisNotificationListenerService.createNotificationSettingsIntent())
+            }
+
+            // 7. Telecom Authority (Phone Calls, Contacts, SMS)
+            PermissionRow(
+                icon = Icons.Default.PhoneInTalk,
+                title = "Telecom Authority",
+                subtitle = if (hasTelecomPermissions) "Active (Phone calls, contact directory, SMS)" else "Tap to authorize phone calling, contacts & SMS",
+                isGranted = hasTelecomPermissions
+            ) {
+                telecomPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.CALL_PHONE,
+                        Manifest.permission.READ_CONTACTS,
+                        Manifest.permission.SEND_SMS
+                    )
+                )
+            }
 
             if (agentEnabled) {
                 Spacer(Modifier.height(8.dp))

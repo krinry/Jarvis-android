@@ -41,6 +41,7 @@ import dev.krinry.jarvis.agent.AgentLlmEngine
 import dev.krinry.jarvis.agent.GeminiLiveEngine
 import dev.krinry.jarvis.ai.GroqApiClient
 import dev.krinry.jarvis.security.SecureKeyStore
+import dev.krinry.jarvis.ui.ArcReactorView
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
@@ -86,6 +87,7 @@ class FloatingBubbleService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
+    private var arcReactorView: ArcReactorView? = null
     private var subtitleView: View? = null
     private var agentEngine: AgentLlmEngine? = null
     private var geminiLiveEngine: GeminiLiveEngine? = null
@@ -135,13 +137,19 @@ class FloatingBubbleService : Service() {
             onStatusUpdate = { status ->
                 scope.launch(Dispatchers.Main) {
                     addSubtitle(status)
-                    if (status.startsWith("✅")) {
+                    if (status.startsWith("⚡")) {
+                        arcReactorView?.setState(ArcReactorView.State.SPEAKING)
+                    } else if (status.startsWith("🗣️")) {
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                    } else if (status.startsWith("✅")) {
+                        arcReactorView?.setState(ArcReactorView.State.LISTENING)
                         stopThinkingAnimation()
                         if (status.contains("Ho gaya") || status.contains("completed") || status.contains("poora")) {
                             playCompletionSound()
                             vibratePattern(longArrayOf(0, 80, 60, 80))
                         }
                     } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
+                        arcReactorView?.setState(ArcReactorView.State.IDLE)
                         stopThinkingAnimation()
                         vibrateShort()
                     }
@@ -149,12 +157,22 @@ class FloatingBubbleService : Service() {
             }
             onThinkingChanged = { thinking ->
                 scope.launch(Dispatchers.Main) {
-                    if (thinking) startThinkingAnimation()
-                    else stopThinkingAnimation()
+                    if (thinking) {
+                        arcReactorView?.setState(ArcReactorView.State.THINKING)
+                        startThinkingAnimation()
+                    } else {
+                        if (geminiLiveEngine?.isRunning() == true) {
+                            arcReactorView?.setState(ArcReactorView.State.LISTENING)
+                        } else {
+                            arcReactorView?.setState(ArcReactorView.State.IDLE)
+                        }
+                        stopThinkingAnimation()
+                    }
                 }
             }
             onSessionEnded = {
                 scope.launch(Dispatchers.Main) {
+                    arcReactorView?.setState(ArcReactorView.State.IDLE)
                     animateBubble(false)
                     stopThinkingAnimation()
                 }
@@ -240,20 +258,11 @@ class FloatingBubbleService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        val bubbleSize = dpToPx(54)
-        val bubble = FrameLayout(this).apply {
-            background = createBubbleDrawable()
-            elevation = dpToPx(8).toFloat()
+        val bubbleSize = dpToPx(58)
+        val arcReactor = ArcReactorView(this).apply {
+            elevation = dpToPx(10).toFloat()
         }
-
-        val icon = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_btn_speak_now)
-            val padding = dpToPx(13)
-            setPadding(padding, padding, padding, padding)
-        }
-        bubble.addView(icon, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
-        ))
+        arcReactorView = arcReactor
 
         val bubbleParams = WindowManager.LayoutParams(
             bubbleSize, bubbleSize, overlayType,
@@ -271,7 +280,7 @@ class FloatingBubbleService : Service() {
         val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
         val longPressRunnable = Runnable { if (!isMoved) { vibrateShort(); showBubbleMenu() } }
 
-        bubble.setOnTouchListener { _, event ->
+        arcReactor.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = bubbleParams.x; initialY = bubbleParams.y
@@ -290,7 +299,7 @@ class FloatingBubbleService : Service() {
                         }
                     }
                     bubbleParams.x = initialX + dx; bubbleParams.y = initialY + dy
-                    windowManager.updateViewLayout(bubble, bubbleParams); true
+                    windowManager.updateViewLayout(arcReactor, bubbleParams); true
                 }
                 MotionEvent.ACTION_UP -> {
                     longPressHandler.removeCallbacks(longPressRunnable)
@@ -314,8 +323,8 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        windowManager.addView(bubble, bubbleParams)
-        bubbleView = bubble
+        windowManager.addView(arcReactor, bubbleParams)
+        bubbleView = arcReactor
 
         // === Subtitle overlay ===
         val subtitleContainer = LinearLayout(this).apply {
@@ -511,11 +520,13 @@ class FloatingBubbleService : Service() {
         if (mode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
             if (geminiLiveEngine?.isRunning() == true) {
                 geminiLiveEngine?.stopSession()
+                arcReactorView?.setState(ArcReactorView.State.IDLE)
                 stopThinkingAnimation()
                 animateBubble(false)
                 vibrateShort()
             } else {
                 vibrateShort()
+                arcReactorView?.setState(ArcReactorView.State.LISTENING)
                 animateBubble(true)
                 geminiLiveEngine?.startSession()
             }
