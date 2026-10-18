@@ -70,11 +70,27 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
     var agentEnabled by remember { mutableStateOf(SecureKeyStore.isAgentEnabled(context)) }
     val allReady = isAccessibilityEnabled && hasOverlayPermission && hasAudioPermission
 
-    // Provider state
+    // Engine Mode: Gemini Live API vs Groq
+    var engineMode by remember { mutableStateOf(SecureKeyStore.getEngineMode(context)) }
+
+    // Gemini Live configuration
+    var geminiApiKey by remember { mutableStateOf(SecureKeyStore.getGeminiApiKey(context) ?: "") }
+    var geminiModel by remember { mutableStateOf(SecureKeyStore.getGeminiLiveModel(context)) }
+    var geminiVoice by remember { mutableStateOf(SecureKeyStore.getGeminiVoice(context)) }
+    var geminiModelExpanded by remember { mutableStateOf(false) }
+    var geminiVoiceExpanded by remember { mutableStateOf(false) }
+
+    val geminiModels = listOf(
+        "gemini-3.8-live" to "Gemini 3.8 Live (Low Latency)",
+        "gemini-3.8-live-extended-thinking" to "Gemini 3.8 Live Extended Thinking (High Reasoning)"
+    )
+    val geminiVoices = listOf("Puck", "Aoede", "Charon", "Fenrir", "Kore")
+
+    // Groq configuration state (kept intact)
     val providers = remember { GroqApiClient.getProviders() }
     var selectedProviderId by remember { mutableStateOf(SecureKeyStore.getApiProvider(context)) }
     val selectedProvider = remember(selectedProviderId) { GroqApiClient.getProvider(selectedProviderId) ?: providers.first() }
-    var apiKey by remember(selectedProviderId) {
+    var groqApiKey by remember(selectedProviderId) {
         mutableStateOf(selectedProvider.getApiKey(context) ?: "")
     }
     var primaryModel by remember { mutableStateOf(SecureKeyStore.getPrimaryModel(context)) }
@@ -115,7 +131,11 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Text("JARVIS", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp, letterSpacing = 3.sp)
-                            Text("AI Voice Agent", color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, letterSpacing = 1.sp)
+                            Text(
+                                if (engineMode == SecureKeyStore.ENGINE_GEMINI_LIVE) "Gemini Live Multimodal Voice"
+                                else "AI Voice Assistant",
+                                color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, letterSpacing = 1.sp
+                            )
                         }
                     }
                     Spacer(Modifier.height(20.dp))
@@ -149,7 +169,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
 
             // ===== PERMISSIONS =====
             SectionHeader("Setup", Icons.Default.Shield)
-            PermissionRow(Icons.Default.Accessibility, "Accessibility Service", "Read & interact with apps", isAccessibilityEnabled) {
+            PermissionRow(Icons.Default.Accessibility, "Accessibility Service", "Read screen & execute actions", isAccessibilityEnabled) {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
             }
             PermissionRow(Icons.Default.Layers, "Display Over Apps", "Floating AI bubble", hasOverlayPermission) {
@@ -157,7 +177,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                     context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
                 }
             }
-            PermissionRow(Icons.Default.Mic, "Microphone", "Voice commands", hasAudioPermission) { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+            PermissionRow(Icons.Default.Mic, "Microphone", "Live voice input", hasAudioPermission) { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
 
             if (agentEnabled) {
                 Spacer(Modifier.height(8.dp))
@@ -168,7 +188,7 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        if (allReady) "✅ All set! Tap floating bubble to start." else "⚠️ Grant all permissions above.",
+                        if (allReady) "✅ All set! Tap floating bubble to speak." else "⚠️ Grant all permissions above.",
                         fontSize = 13.sp, color = if (allReady) JarvisSuccess else JarvisError, textAlign = TextAlign.Center
                     )
                 }
@@ -176,102 +196,266 @@ fun AgentSettingsScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            // ===== AI PROVIDER (DROPDOWN FORM) =====
-            SectionHeader("AI Configuration", Icons.Default.Hub)
+            // ===== ENGINE SELECTOR (GEMINI LIVE vs GROQ) =====
+            SectionHeader("AI Engine Selection", Icons.Default.ElectricBolt)
 
-            // Provider dropdown
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                shape = RoundedCornerShape(16.dp), color = DarkCard
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Provider", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
-                    ExposedDropdownMenuBox(expanded = providerExpanded, onExpandedChange = { providerExpanded = it }) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Gemini Live Tab
+                val isGemini = engineMode == SecureKeyStore.ENGINE_GEMINI_LIVE
+                Surface(
+                    onClick = {
+                        engineMode = SecureKeyStore.ENGINE_GEMINI_LIVE
+                        SecureKeyStore.setEngineMode(context, SecureKeyStore.ENGINE_GEMINI_LIVE)
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isGemini) JarvisPrimary.copy(alpha = 0.2f) else DarkCard,
+                    border = if (isGemini) androidx.compose.foundation.BorderStroke(1.5.dp, JarvisPrimary) else null
+                ) {
+                    Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Bolt, null, tint = if (isGemini) JarvisPrimary else DarkOnSurfaceVariant)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Gemini Live", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (isGemini) Color.White else DarkOnSurface)
+                        Text("Real-time Audio+Tools", fontSize = 11.sp, color = DarkOnSurfaceVariant, textAlign = TextAlign.Center)
+                    }
+                }
+
+                // Groq Tab
+                val isGroq = engineMode == SecureKeyStore.ENGINE_GROQ
+                Surface(
+                    onClick = {
+                        engineMode = SecureKeyStore.ENGINE_GROQ
+                        SecureKeyStore.setEngineMode(context, SecureKeyStore.ENGINE_GROQ)
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isGroq) JarvisSecondary.copy(alpha = 0.2f) else DarkCard,
+                    border = if (isGroq) androidx.compose.foundation.BorderStroke(1.5.dp, JarvisSecondary) else null
+                ) {
+                    Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Forum, null, tint = if (isGroq) JarvisSecondary else DarkOnSurfaceVariant)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Groq Engine", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (isGroq) Color.White else DarkOnSurface)
+                        Text("Whisper + Chat API", fontSize = 11.sp, color = DarkOnSurfaceVariant, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // =================================================================
+            // GEMINI LIVE API CONFIGURATION
+            // =================================================================
+            if (engineMode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
+                SectionHeader("Gemini Live API Settings", Icons.Default.SettingsVoice)
+
+                // Gemini API Key Input
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp), color = DarkCard
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Google Gemini API Key", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
                         OutlinedTextField(
-                            value = selectedProvider.displayName,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            value = geminiApiKey,
+                            onValueChange = { newKey ->
+                                geminiApiKey = newKey
+                                SecureKeyStore.saveGeminiApiKey(context, newKey)
+                            },
+                            placeholder = { Text("AIzaSy...") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = JarvisPrimary,
                                 unfocusedBorderColor = DarkSurfaceVariant
                             )
                         )
-                        ExposedDropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
-                            providers.forEach { provider ->
-                                DropdownMenuItem(
-                                    text = { Text(provider.displayName) },
-                                    onClick = {
-                                        selectedProviderId = provider.id
-                                        SecureKeyStore.setApiProvider(context, provider.id)
-                                        apiKey = provider.getApiKey(context) ?: ""
-                                        // Reset models when provider changes
-                                        primaryModel = ""
-                                        fallbackModel = ""
-                                        SecureKeyStore.setPrimaryModel(context, "")
-                                        SecureKeyStore.setFallbackModel(context, "")
-                                        providerExpanded = false
-                                    }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "✨ Gemini Live API enables instant bidirectional voice streaming, native 24kHz Hindi speech (TTS), real-time STT, and direct UI action tools.",
+                            fontSize = 11.sp, color = JarvisAccent.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+
+                // Gemini Live Model Selector
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp), color = DarkCard
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Live Model", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = geminiModelExpanded,
+                            onExpandedChange = { geminiModelExpanded = it }
+                        ) {
+                            OutlinedTextField(
+                                value = geminiModels.find { it.first == geminiModel }?.second ?: geminiModel,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = geminiModelExpanded) },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = JarvisPrimary,
+                                    unfocusedBorderColor = DarkSurfaceVariant
                                 )
+                            )
+                            ExposedDropdownMenu(
+                                expanded = geminiModelExpanded,
+                                onDismissRequest = { geminiModelExpanded = false }
+                            ) {
+                                geminiModels.forEach { (modelId, modelLabel) ->
+                                    DropdownMenuItem(
+                                        text = { Text(modelLabel) },
+                                        onClick = {
+                                            geminiModel = modelId
+                                            SecureKeyStore.setGeminiLiveModel(context, modelId)
+                                            geminiModelExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Gemini Live Voice Selector
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp), color = DarkCard
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Assistant Voice", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = geminiVoiceExpanded,
+                            onExpandedChange = { geminiVoiceExpanded = it }
+                        ) {
+                            OutlinedTextField(
+                                value = geminiVoice,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = geminiVoiceExpanded) },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = JarvisPrimary,
+                                    unfocusedBorderColor = DarkSurfaceVariant
+                                )
+                            )
+                            ExposedDropdownMenu(
+                                expanded = geminiVoiceExpanded,
+                                onDismissRequest = { geminiVoiceExpanded = false }
+                            ) {
+                                geminiVoices.forEach { voice ->
+                                    DropdownMenuItem(
+                                        text = { Text(voice) },
+                                        onClick = {
+                                            geminiVoice = voice
+                                            SecureKeyStore.setGeminiVoice(context, voice)
+                                            geminiVoiceExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // API Key field (single, for selected provider)
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                shape = RoundedCornerShape(16.dp), color = DarkCard
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("${selectedProvider.displayName} API Key", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = apiKey,
-                        onValueChange = { newKey ->
-                            apiKey = newKey
-                            selectedProvider.saveApiKey(context, newKey)
-                        },
-                        placeholder = { Text("Enter API key...") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = JarvisPrimary,
-                            unfocusedBorderColor = DarkSurfaceVariant
-                        )
-                    )
-                    // Groq STT note
-                    if (selectedProviderId != "groq") {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "💡 STT (voice) always uses Groq Whisper. Set Groq API key too for voice commands.",
-                            fontSize = 11.sp, color = JarvisWarning.copy(alpha = 0.8f)
+            // =================================================================
+            // GROQ CONFIGURATION (KEPT FOR COMPATIBILITY)
+            // =================================================================
+            if (engineMode == SecureKeyStore.ENGINE_GROQ) {
+                SectionHeader("Groq Configuration", Icons.Default.Hub)
+
+                // Provider dropdown
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp), color = DarkCard
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Provider", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        ExposedDropdownMenuBox(expanded = providerExpanded, onExpandedChange = { providerExpanded = it }) {
+                            OutlinedTextField(
+                                value = selectedProvider.displayName,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = JarvisPrimary,
+                                    unfocusedBorderColor = DarkSurfaceVariant
+                                )
+                            )
+                            ExposedDropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
+                                providers.forEach { provider ->
+                                    DropdownMenuItem(
+                                        text = { Text(provider.displayName) },
+                                        onClick = {
+                                            selectedProviderId = provider.id
+                                            SecureKeyStore.setApiProvider(context, provider.id)
+                                            groqApiKey = provider.getApiKey(context) ?: ""
+                                            primaryModel = ""
+                                            fallbackModel = ""
+                                            SecureKeyStore.setPrimaryModel(context, "")
+                                            SecureKeyStore.setFallbackModel(context, "")
+                                            providerExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // API Key field
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp), color = DarkCard
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("${selectedProvider.displayName} API Key", fontSize = 12.sp, color = DarkOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = groqApiKey,
+                            onValueChange = { newKey ->
+                                groqApiKey = newKey
+                                selectedProvider.saveApiKey(context, newKey)
+                            },
+                            placeholder = { Text("Enter API key...") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = JarvisPrimary,
+                                unfocusedBorderColor = DarkSurfaceVariant
+                            )
                         )
                     }
                 }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Models section
+                SectionHeader("Models", Icons.Default.Psychology)
+                SettingsRow(Icons.Default.AutoAwesome, "Primary Model",
+                    primaryModel.ifEmpty { selectedProvider.defaultModel }, JarvisSecondary
+                ) { modelPickerTarget = "primary"; showModelPicker = true }
+
+                SettingsRow(Icons.Default.SwapHoriz, "Fallback Model",
+                    fallbackModel.ifEmpty { selectedProvider.defaultFallbackModel }, JarvisAccent
+                ) { modelPickerTarget = "fallback"; showModelPicker = true }
             }
 
-            Spacer(Modifier.height(16.dp))
-
-            // ===== MODEL SELECTION =====
-            SectionHeader("Models", Icons.Default.Psychology)
-
-            SettingsRow(Icons.Default.AutoAwesome, "Primary Model",
-                primaryModel.ifEmpty { selectedProvider.defaultModel }, JarvisSecondary
-            ) { modelPickerTarget = "primary"; showModelPicker = true }
-
-            SettingsRow(Icons.Default.SwapHoriz, "Fallback Model",
-                fallbackModel.ifEmpty { selectedProvider.defaultFallbackModel }, JarvisAccent
-            ) { modelPickerTarget = "fallback"; showModelPicker = true }
-
             Spacer(Modifier.height(40.dp))
-
-            Text("Jarvis v1.0 • by Krinry", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
+            Text("Jarvis v1.2 • with Gemini Live API", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, color = DarkOnSurfaceVariant.copy(alpha = 0.5f))
             Spacer(Modifier.height(24.dp))
         }
     }

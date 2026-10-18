@@ -36,7 +36,12 @@ class AgentTtsManager(private val context: Context) : TextToSpeech.OnInitListene
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             val languageCode = SecureKeyStore.getDefaultLanguage(context)
-            val locale = Locale(languageCode, "IN")
+            val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Locale.Builder().setLanguage(languageCode).setRegion("IN").build()
+            } else {
+                @Suppress("DEPRECATION")
+                Locale(languageCode, "IN")
+            }
             val result = tts?.setLanguage(locale)
 
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {

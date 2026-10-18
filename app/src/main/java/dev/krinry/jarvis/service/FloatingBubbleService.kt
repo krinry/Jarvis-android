@@ -38,7 +38,9 @@ import androidx.core.app.NotificationCompat
 import dev.krinry.jarvis.MainActivity
 import dev.krinry.jarvis.R
 import dev.krinry.jarvis.agent.AgentLlmEngine
+import dev.krinry.jarvis.agent.GeminiLiveEngine
 import dev.krinry.jarvis.ai.GroqApiClient
+import dev.krinry.jarvis.security.SecureKeyStore
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
@@ -86,6 +88,7 @@ class FloatingBubbleService : Service() {
     private var bubbleView: View? = null
     private var subtitleView: View? = null
     private var agentEngine: AgentLlmEngine? = null
+    private var geminiLiveEngine: GeminiLiveEngine? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var isListening = false
@@ -126,6 +129,36 @@ class FloatingBubbleService : Service() {
                 }
             }
         }
+
+        // Initialize Gemini Live Engine
+        geminiLiveEngine = GeminiLiveEngine(applicationContext).apply {
+            onStatusUpdate = { status ->
+                scope.launch(Dispatchers.Main) {
+                    addSubtitle(status)
+                    if (status.startsWith("✅")) {
+                        stopThinkingAnimation()
+                        playCompletionSound()
+                        vibratePattern(longArrayOf(0, 80, 60, 80))
+                    } else if (status.startsWith("❌") || status.startsWith("⚠️") || status.startsWith("⏹")) {
+                        stopThinkingAnimation()
+                        vibrateShort()
+                    }
+                }
+            }
+            onThinkingChanged = { thinking ->
+                scope.launch(Dispatchers.Main) {
+                    if (thinking) startThinkingAnimation()
+                    else stopThinkingAnimation()
+                }
+            }
+            onSessionEnded = {
+                scope.launch(Dispatchers.Main) {
+                    animateBubble(false)
+                    stopThinkingAnimation()
+                }
+            }
+        }
+
         isRunning = true
         startForegroundNotification()
     }
@@ -141,6 +174,8 @@ class FloatingBubbleService : Service() {
     override fun onDestroy() {
         isRunning = false
         scope.cancel()
+        geminiLiveEngine?.stopSession()
+        geminiLiveEngine = null
         stopRecording()
         stopThinkingAnimation()
         releaseWakeLock()
@@ -322,7 +357,9 @@ class FloatingBubbleService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
+        val isGeminiLive = SecureKeyStore.getEngineMode(this) == SecureKeyStore.ENGINE_GEMINI_LIVE
         val menuItems = mutableListOf<String>()
+        menuItems.add(if (isGeminiLive) "🚀 Engine: Gemini Live API (Tap: Switch to Groq)" else "⚡ Engine: Groq (Tap: Switch to Gemini)")
         menuItems.add("🔄 Repeat Last Command")
         menuItems.add("🗑️ Clear Subtitles")
         menuItems.add(if (keepScreenOn) "🌙 Screen: Auto-off" else "☀️ Screen: Always On")
@@ -350,16 +387,22 @@ class FloatingBubbleService : Service() {
         menuItems.forEachIndexed { index, item ->
             val tv = TextView(this).apply {
                 text = item
-                textSize = 16f
+                textSize = 15f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(dpToPx(20), dpToPx(14), dpToPx(20), dpToPx(14))
                 setOnClickListener {
                     try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
                     when (index) {
-                        0 -> repeatLastCommand()
-                        1 -> clearSubtitles()
-                        2 -> toggleKeepScreenOn()
-                        3 -> stopSelf()
+                        0 -> {
+                            val newMode = if (isGeminiLive) SecureKeyStore.ENGINE_GROQ else SecureKeyStore.ENGINE_GEMINI_LIVE
+                            SecureKeyStore.setEngineMode(applicationContext, newMode)
+                            addSubtitle(if (newMode == SecureKeyStore.ENGINE_GEMINI_LIVE) "🚀 Active: Gemini Live API" else "⚡ Active: Groq Engine")
+                            vibrateShort()
+                        }
+                        1 -> repeatLastCommand()
+                        2 -> clearSubtitles()
+                        3 -> toggleKeepScreenOn()
+                        4 -> stopSelf()
                     }
                 }
             }
@@ -454,6 +497,22 @@ class FloatingBubbleService : Service() {
     // =========================================================================
 
     private fun onBubbleTapped() {
+        val mode = SecureKeyStore.getEngineMode(applicationContext)
+        if (mode == SecureKeyStore.ENGINE_GEMINI_LIVE) {
+            if (geminiLiveEngine?.isRunning() == true) {
+                geminiLiveEngine?.stopSession()
+                stopThinkingAnimation()
+                animateBubble(false)
+                vibrateShort()
+            } else {
+                vibrateShort()
+                animateBubble(true)
+                geminiLiveEngine?.startSession()
+            }
+            return
+        }
+
+        // Groq Mode
         if (isProcessingCommand) {
             agentEngine?.cancelTask()
             isProcessingCommand = false
