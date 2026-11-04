@@ -41,7 +41,7 @@ jobs:
       - name: Upload Release APKs
         uses: softprops/action-gh-release@v1
         with:
-          name: "J.A.R.V.I.S. 2.0"
+          name: "J.A.R.V.I.S. ${{ github.ref_name }}"
           files: app/build/outputs/apk/release/*.apk
           body_path: RELEASE_NOTES.md
         env:
