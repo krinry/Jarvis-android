@@ -235,6 +235,7 @@ class FloatingBubbleService : Service() {
         scope.cancel()
         geminiLiveEngine?.stopSession()
         geminiLiveEngine = null
+        dev.krinry.jarvis.system.LocalWebServer.stop()
         stopRecording()
         stopThinkingAnimation()
         releaseWakeLock()

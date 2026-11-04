@@ -169,6 +169,41 @@ object ActionExecutor {
                     if (ok) "✅ $msg" else "❌ $msg"
                 }
             }
+            "press_key" -> {
+                val key = action.text ?: "ENTER"
+                val keyCode = when (key.uppercase()) {
+                    "ENTER" -> android.view.KeyEvent.KEYCODE_ENTER
+                    "TAB" -> android.view.KeyEvent.KEYCODE_TAB
+                    "BACK" -> android.view.KeyEvent.KEYCODE_BACK
+                    "HOME" -> android.view.KeyEvent.KEYCODE_HOME
+                    "SEARCH" -> android.view.KeyEvent.KEYCODE_SEARCH
+                    "SPACE" -> android.view.KeyEvent.KEYCODE_SPACE
+                    "DELETE", "BACKSPACE" -> android.view.KeyEvent.KEYCODE_DEL
+                    "ESCAPE" -> android.view.KeyEvent.KEYCODE_ESCAPE
+                    else -> android.view.KeyEvent.KEYCODE_ENTER
+                }
+                if (key.equals("BACK", ignoreCase = true)) {
+                    service.pressBack()
+                    "✅ Back dabaya"
+                } else if (key.equals("HOME", ignoreCase = true)) {
+                    service.pressHome()
+                    "✅ Home dabaya"
+                } else {
+                    kotlinx.coroutines.runBlocking {
+                        dev.krinry.jarvis.system.ShizukuBridge.keyEvent(keyCode)
+                    }
+                    "✅ Key press kiya: $key"
+                }
+            }
+            "drag", "drag_gesture" -> {
+                val startX = action.x ?: 540
+                val startY = action.y ?: 1200
+                val coords = action.text?.split(",")?.mapNotNull { it.trim().toIntOrNull() }
+                val endX = if (coords?.size == 2) coords[0] else startX
+                val endY = if (coords?.size == 2) coords[1] else startY - 500
+                service.performGlobalSwipe(startX.toFloat(), startY.toFloat(), endX.toFloat(), endY.toFloat(), 350)
+                "✅ Drag kiya ($startX, $startY) se ($endX, $endY) tak"
+            }
             "wait" -> "⏳ Screen load ho raha hai..."
             "done" -> "✅ Kaam ho gaya!"
             else -> "❓ Unknown action: ${action.action}"

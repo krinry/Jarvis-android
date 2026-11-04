@@ -112,37 +112,54 @@ object ShizukuBridge {
     }
 
     /**
-     * Executes an arbitrary shell command using Shizuku's ADB/Root process.
+     * Executes an arbitrary shell command with a 3-tier authority fallback:
+     * 1. Shizuku remote process (ADB OS Authority)
+     * 2. SuperUser 'su' (Root Authority)
+     * 3. Local Runtime 'sh' (User-level Shell Execution)
      */
     suspend fun executeShell(command: String): ShellResult = withContext(Dispatchers.IO) {
-        if (!hasShizukuPermission()) {
-            return@withContext ShellResult(
-                exitCode = -1,
-                stdout = "",
-                stderr = "Shizuku permission not granted or service inactive"
-            )
+        // 1. Shizuku ADB Process
+        if (hasShizukuPermission()) {
+            try {
+                val process = spawnProcess(arrayOf("sh", "-c", command))
+                if (process != null) {
+                    val stdout = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
+                    val stderr = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
+                    val exitCode = process.waitFor()
+                    Log.d(TAG, "[Shizuku: $command] -> exitCode=$exitCode, out='${stdout.take(60)}'")
+                    return@withContext ShellResult(exitCode, stdout.trim(), stderr.trim())
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Shizuku exec failed, attempting root/local fallback", e)
+            }
         }
 
+        // 2. Root 'su' Process
         try {
-            val process = spawnProcess(arrayOf("sh", "-c", command))
-                ?: return@withContext ShellResult(
-                    exitCode = -1,
-                    stdout = "",
-                    stderr = "Could not initialize Shizuku remote process"
-                )
+            val suProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            val stdout = BufferedReader(InputStreamReader(suProcess.inputStream)).use { it.readText() }
+            val stderr = BufferedReader(InputStreamReader(suProcess.errorStream)).use { it.readText() }
+            val exitCode = suProcess.waitFor()
+            if (exitCode == 0 || stdout.isNotBlank()) {
+                Log.d(TAG, "[su: $command] -> exitCode=$exitCode, out='${stdout.take(60)}'")
+                return@withContext ShellResult(exitCode, stdout.trim(), stderr.trim())
+            }
+        } catch (_: Exception) {}
 
-            val stdout = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
-            val stderr = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            val exitCode = process.waitFor()
-
-            Log.d(TAG, "[$command] -> exitCode=$exitCode, out='${stdout.take(60)}'")
+        // 3. Local Android Runtime 'sh' Process
+        try {
+            val shProcess = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val stdout = BufferedReader(InputStreamReader(shProcess.inputStream)).use { it.readText() }
+            val stderr = BufferedReader(InputStreamReader(shProcess.errorStream)).use { it.readText() }
+            val exitCode = shProcess.waitFor()
+            Log.d(TAG, "[local sh: $command] -> exitCode=$exitCode, out='${stdout.take(60)}'")
             ShellResult(exitCode, stdout.trim(), stderr.trim())
         } catch (e: Exception) {
-            Log.e(TAG, "Error executing shell command: $command", e)
+            Log.e(TAG, "All shell execution backends failed for: $command", e)
             ShellResult(
                 exitCode = -1,
                 stdout = "",
-                stderr = e.message ?: "Execution failed"
+                stderr = e.message ?: "Shell execution failed"
             )
         }
     }

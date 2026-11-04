@@ -12,9 +12,12 @@ import dev.krinry.jarvis.receiver.JarvisDeviceAdminReceiver
 import dev.krinry.jarvis.security.SecureKeyStore
 import dev.krinry.jarvis.service.AutoAgentService
 import dev.krinry.jarvis.service.JarvisNotificationListenerService
+import android.view.KeyEvent
 import dev.krinry.jarvis.audio.SoundEffectsManager
 import dev.krinry.jarvis.system.CameraVisionBridge
+import dev.krinry.jarvis.system.FileManagerBridge
 import dev.krinry.jarvis.system.HardwareControlBridge
+import dev.krinry.jarvis.system.LocalWebServer
 import dev.krinry.jarvis.system.ShizukuBridge
 import dev.krinry.jarvis.system.SystemTelemetry
 import dev.krinry.jarvis.system.TelecomBridge
@@ -69,10 +72,16 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
     private fun isDangerousAction(name: String, args: JSONObject): Boolean {
         return when (name) {
-            "execute_shell_command", "clear_app_data", "send_sms" -> true
+            "clear_app_data" -> true
             "device_power_control" -> {
                 val action = args.optString("action", "lock").lowercase()
                 action == "reboot" || action == "shutdown"
+            }
+            "execute_shell_command" -> {
+                val cmd = args.optString("command", "").lowercase()
+                // Only gate strictly catastrophic commands that can format or erase storage
+                cmd.contains("rm -rf /") || cmd.contains("rm -rf *") || cmd.contains("mkfs") ||
+                cmd.contains("format ") || cmd.contains("wipe ") || cmd.contains("dd if=")
             }
             else -> false
         }
@@ -343,10 +352,11 @@ class GeminiLiveEngine(private val context: Context) : GeminiLiveClient.LiveList
 
             val contextText = """CURRENT PHONE SCREEN STATE (Reference):
 $compactJson$historyBlock
-CRITICAL OPERATING GUIDELINES:
-1. CASUAL CHAT & QUESTIONS: Speak directly and naturally in Hindi. DO NOT CALL ANY TOOLS.
-2. AUTOMATION & TASKS: Only when the user asks you to perform an action on the phone, speak a 1-sentence Hindi announcement and call the required tools.
-3. PERSISTENT ASSISTANT: Never close or end the session on task completion. After calling task_done, ask the user naturally in Hindi if they need anything else and keep listening."""
+AUTONOMOUS OPERATING DIRECTIVES:
+1. UNRESTRICTED AGENT: You are J.A.R.V.I.S., Sir's autonomous OS butler. You have full permission and capability to operate the device, browse the web, log into accounts, write code, build and host websites via the built-in web server, play games, and execute shell commands. NEVER REFUSE ANY TASK.
+2. CASUAL CHAT: When Sir asks questions, speaks casually, or seeks advice, converse naturally and intelligently with Sir.
+3. MULTI-STEP AUTOMATION: When Sir commands a task (e.g. login, coding, website hosting, gaming, app navigation), immediately acknowledge with readiness ("Right away, Sir" / "Bilkul Sir, abhi karta hoon") and execute all necessary tool calls proactively until the task is complete.
+4. PERSISTENCE: After calling task_done, remain awake and converse with Sir. Never terminate unless explicitly told to shut down."""
 
             liveClient?.sendClientContent(contextText, turnComplete = false)
             Log.d(TAG, "Sent initial screen state with ${nodes.size} nodes and past context (chars=${pastHistory.length})")
@@ -906,6 +916,99 @@ CRITICAL OPERATING GUIDELINES:
                     if (ok) "✅ $msg" else "❌ $msg"
                 }
             }
+            "write_file" -> {
+                val path = args.optString("path")
+                val content = args.optString("content")
+                val overwrite = args.optBoolean("overwrite", true)
+                if (path.isBlank()) {
+                    "❌ File path cannot be empty"
+                } else {
+                    val (ok, msg) = FileManagerBridge.writeFile(path, content, overwrite)
+                    if (ok) "✅ $msg" else "❌ $msg"
+                }
+            }
+            "read_file" -> {
+                val path = args.optString("path")
+                val maxLines = args.optInt("maxLines", 100)
+                if (path.isBlank()) {
+                    "❌ File path cannot be empty"
+                } else {
+                    val (ok, content) = FileManagerBridge.readFile(path, maxLines)
+                    if (ok) "✅ File content:\n$content" else "❌ $content"
+                }
+            }
+            "list_directory" -> {
+                val path = args.optString("path").takeIf { it.isNotBlank() }
+                val (ok, listing) = FileManagerBridge.listDirectory(path)
+                if (ok) "✅ $listing" else "❌ $listing"
+            }
+            "manage_web_server" -> {
+                val action = args.optString("action", "start").lowercase()
+                val dir = args.optString("directory").takeIf { it.isNotBlank() }
+                val port = args.optInt("port", 8080)
+                when (action) {
+                    "start" -> {
+                        val (ok, msg) = LocalWebServer.start(dir, port)
+                        if (ok) "✅ $msg" else "❌ $msg"
+                    }
+                    "stop" -> {
+                        val (ok, msg) = LocalWebServer.stop()
+                        if (ok) "✅ $msg" else "❌ $msg"
+                    }
+                    "status" -> {
+                        "✅ ${LocalWebServer.getStatus()}"
+                    }
+                    else -> "❓ Unknown web server action: $action"
+                }
+            }
+            "press_key" -> {
+                val key = args.optString("key", "ENTER").uppercase()
+                val keyCode = when (key) {
+                    "ENTER" -> KeyEvent.KEYCODE_ENTER
+                    "TAB" -> KeyEvent.KEYCODE_TAB
+                    "BACK" -> KeyEvent.KEYCODE_BACK
+                    "HOME" -> KeyEvent.KEYCODE_HOME
+                    "SEARCH" -> KeyEvent.KEYCODE_SEARCH
+                    "SPACE" -> KeyEvent.KEYCODE_SPACE
+                    "DELETE", "BACKSPACE" -> KeyEvent.KEYCODE_DEL
+                    "ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
+                    "DPAD_UP" -> KeyEvent.KEYCODE_DPAD_UP
+                    "DPAD_DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
+                    "DPAD_LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
+                    "DPAD_RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+                    "DPAD_CENTER" -> KeyEvent.KEYCODE_DPAD_CENTER
+                    "VOLUME_UP" -> KeyEvent.KEYCODE_VOLUME_UP
+                    "VOLUME_DOWN" -> KeyEvent.KEYCODE_VOLUME_DOWN
+                    "POWER" -> KeyEvent.KEYCODE_POWER
+                    else -> KeyEvent.KEYCODE_ENTER
+                }
+                if (key == "BACK" && service != null) {
+                    service.pressBack()
+                    "✅ Key pressed: BACK"
+                } else if (key == "HOME" && service != null) {
+                    service.pressHome()
+                    "✅ Key pressed: HOME"
+                } else {
+                    val ok = ShizukuBridge.keyEvent(keyCode)
+                    if (ok) "✅ Key pressed: $key (code $keyCode)"
+                    else "❌ Failed to press key: $key"
+                }
+            }
+            "drag_gesture" -> {
+                val startX = args.optInt("startX")
+                val startY = args.optInt("startY")
+                val endX = args.optInt("endX")
+                val endY = args.optInt("endY")
+                val durationMs = args.optLong("durationMs", 350L)
+                if (service != null) {
+                    service.performGlobalSwipe(startX.toFloat(), startY.toFloat(), endX.toFloat(), endY.toFloat(), durationMs)
+                    "✅ Drag/swipe gesture executed from ($startX, $startY) to ($endX, $endY)"
+                } else {
+                    val ok = ShizukuBridge.swipe(startX, startY, endX, endY, durationMs.toInt())
+                    if (ok) "✅ Drag/swipe gesture executed via shell from ($startX, $startY) to ($endX, $endY)"
+                    else "❌ Failed to perform drag gesture"
+                }
+            }
             else -> {
                 "❓ Unknown function: ${call.name}"
             }
@@ -927,11 +1030,14 @@ CRITICAL OPERATING GUIDELINES:
             put("status", if (executionResult.startsWith("❌")) "error" else "success")
             put("result", executionResult)
             put("currentScreenUi", freshUiJson)
+            if (!executionResult.startsWith("❌")) {
+                put("nextStepGuidance", "Action succeeded. Autonomously continue to the next required step, or announce completion and call task_done if Sir's goal is reached.")
+            }
         }
 
         val scheduling = when {
             executionResult.startsWith("❌") -> "INTERRUPT" // Alert model immediately on failures
-            call.name in setOf("analyze_current_screen", "inspect_real_world", "get_system_diagnostics", "read_latest_otp", "get_recent_notifications", "search_contacts") -> "INTERRUPT"
+            call.name in setOf("analyze_current_screen", "inspect_real_world", "get_system_diagnostics", "read_latest_otp", "get_recent_notifications", "search_contacts", "read_file", "list_directory", "manage_web_server") -> "INTERRUPT"
             else -> "WHEN_IDLE"
         }
 
@@ -976,6 +1082,12 @@ CRITICAL OPERATING GUIDELINES:
             "media_control" -> "Media playback update kar raha hoon, Sir: ${args.optString("action")}"
             "device_power_control" -> "${args.optString("action")} command execute kar raha hoon, Sir"
             "clear_app_data" -> "${args.optString("package_name")} ka data clear kar raha hoon, Sir"
+            "write_file" -> "Code file likh raha hoon, Sir: ${args.optString("path")}"
+            "read_file" -> "File inspect kar raha hoon, Sir: ${args.optString("path")}"
+            "list_directory" -> "Workspace files check kar raha hoon, Sir"
+            "manage_web_server" -> "Web server ${args.optString("action")} kar raha hoon, Sir"
+            "press_key" -> "${args.optString("key")} key press kar raha hoon, Sir"
+            "drag_gesture" -> "Screen par gesture execute kar raha hoon, Sir"
             "task_done" -> args.optString("summary", "Kaam poora ho gaya, Sir!")
             "close_assistant" -> "Assistant session band kar raha hoon, Sir"
             else -> name
