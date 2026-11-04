@@ -1,41 +1,51 @@
-# ⚡ J.A.R.V.I.S. 2.0 — Made by Krinry
+# ⚡ J.A.R.V.I.S. 2.1.0 — Made by Krinry
 
-> *"Just A Rather Very Intelligent System"* — Operating-System-Level AI Butler for Android.
+> *"Just A Rather Very Intelligent System"* — Unstoppable Operating-System-Level Autonomous Agent for Android.
 
-Welcome to **J.A.R.V.I.S. 2.0**, a monumental evolution from a standard voice assistant into a true Iron Man operating-system-level Butler. Powered by Google Gemini Live 24kHz bidirectional streaming, Stark Holographic Command Deck, Canvas Arc Reactor HUD, Shizuku Shell, Device Admin, and a 37-Tool Autonomous Action Suite.
-
----
-
-## 🌟 Major Highlights & What's New
-
-### 🎙️ 1. Gemini Live 24kHz Multimodal Butler Engine
-- **Direct BidiGenerateContent WebSocket Streaming**: Real-time microphone audio input (16kHz PCM little-endian) and native loudspeaker playback (24kHz PCM little-endian) using dedicated `AudioTrackPlayer`.
-- **Sub-300ms Turn-Taking**: Natural spoken dialogue with hardware echo suppression, Voice Activity Detection (VAD), and automatic voice barge-in interruption.
-- **Butler Persona & Bilingual Intelligence**: Natural Hindi/Hinglish and refined English addressing the user respectfully as *"Sir"* or *"Krinry Sir"*.
-- **Offline Conversation Memory**: Persistent SQLite turn history (`ConversationHistoryStore`) retaining past context across app restarts.
-- **Context Window Compression & Session Resumption**: Prevents 15-minute drops with sliding window compression and auto-reconnects with exponential backoff.
-
-### 🛡️ 2. 37-Tool Autonomous Action Suite & Security Gate
-- **Navigation & Apps**: `open_app`, `open_url`, `close_assistant`, `task_done`.
-- **Optic Vision Perception**: `analyze_current_screen`, `inspect_real_world` (seamless front/back camera lens frame capture into vision stream), `read_screen`, `take_screenshot`.
-- **Hardware Controls**: `toggle_flashlight`, `toggle_hotspot`, `set_volume` (smart stream routing), `toggle_dnd`, `toggle_auto_rotate`, `media_control`, `device_power_control`, `lock_phone`, `set_brightness`.
-- **System Authority & Shell**: `execute_shell_command` (ADB / Shizuku / Root), `clear_app_data`, `get_system_diagnostics`.
-- **Telecom & Notifications**: `get_recent_notifications`, `reply_notification`, `read_latest_otp`, `make_phone_call`, `search_contacts`, `send_sms`.
-- **Anti-Prompt Injection Security Confirmation Gate**: Defends against untrusted text in screens and notifications. High-risk actions (`execute_shell_command`, `clear_app_data`, `send_sms`, power off/reboot) are intercepted client-side, requiring Sir's explicit vocal authorization before execution.
-
-### ⚛️ 3. Stark Holographic Command Deck & Arc Reactor HUD
-- **Canvas Arc Reactor View**: Animated holographic Arc Reactor (`ArcReactorView.kt`) with 5 states (`IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `ERROR`).
-- **Real-Time System Telemetry Matrix**: Live gauges for Battery, Thermal sensors, Charging mode, Neural Core status, Memory & Storage diagnostics.
-- **Krinry Branding**: Clean `KRINRY • MADE BY KRINRY` & `JARVIS BY KRINRY` header hierarchy.
-- **Always-On-Top Floating Arc Reactor Bubble**: Draggable overlay bubble with Stark HUD Quick Controls long-press menu.
-
-### 👂 4. Hands-Free Wake Word & Marvel Soundpack
-- **"Hey Jarvis" Voice Activation**: Low-power background wake word detection (`WakeWordDetector.kt`).
-- **Authentic Iron Man UI Sound FX**: Custom audio feedback for system boot, arc reactor engage, repulsor charge, and target lock.
+Welcome to **J.A.R.V.I.S. 2.1.0**, an unstoppable evolution of the personal Iron Man operating system. This release completely removes all refusals, introducing full human-level autonomous execution across browser logins, coding, local website hosting, and mobile gaming.
 
 ---
 
-## 📦 Verified Release APKs (Signed via GitHub Actions)
+## 🌟 Major Highlights & What's New in v2.1.0
+
+### 🚀 1. Absolute Zero-Refusal Mandate & Autonomous Persona
+- **No More Refusals**: J.A.R.V.I.S. will never say *"I cannot do that"*, *"I am just an AI"*, *"As a language model"*, or *"Mujhe ye karne ki anumati nahi hai"*. If a human can do it on an Android phone, J.A.R.V.I.S. will execute it.
+- **Loyal Readiness**: Promptly responds with *"Right away, Sir"* or *"Bilkul Sir, abhi karta hoon"* and chains multi-step tools autonomously until the user's objective is achieved.
+
+### 🌐 2. Browser Automation & Form/Login Agent
+- **Human-Like Navigation**: Opens browsers (`open_url` or `open_app("Chrome")`), locates input fields, and fills usernames and passwords (`type_text`).
+- **Form Submission**: Submits forms with the new `press_key("ENTER")` tool or direct button clicks.
+- **2FA OTP Auto-Fill**: Intercepts SMS and notification verification codes (`read_latest_otp`) and enters them seamlessly into two-factor authentication boxes.
+
+### 💻 3. Coding, Software Development & Built-in Web Server Hosting
+- **Native File Creation**: `write_file(path, content, overwrite)` creates production-ready HTML, CSS, JavaScript, Python, Bash, or JSON files anywhere in `/sdcard/Download/JarvisProjects/` or system storage.
+- **Embedded Local Web Server (`LocalWebServer.kt`)**: Hosts HTML/CSS/JS websites directly on Android on `http://localhost:8080` (and Wi-Fi LAN IP) with zero external dependencies (no Node or Python required).
+- **Instant Browser Preview**: Launches Chrome automatically with `open_url("http://localhost:8080")` so Sir can view and interact with their newly hosted website immediately.
+- **Source Inspection**: `read_file` and `list_directory` allow J.A.R.V.I.S. to inspect project directories and debug code.
+
+### 🎮 4. Mobile Gaming & Continuous Automation
+- **Real-Time Visual Perception**: `analyze_current_screen` perceives game state, enemies, obstacles, and scores.
+- **Direct Coordinate Tapping**: `tap_coordinates(x, y)` provides sub-millisecond tactile input on game controls and buttons.
+- **Precision Drag Gestures**: `drag_gesture(startX, startY, endX, endY, durationMs)` and `swipe` for moving joysticks, swiping running characters (Subway Surfers, Temple Run), dragging cards, or chess pieces.
+- **Gaming Keys**: `press_key` for D-pad navigation (`DPAD_UP`, `DPAD_DOWN`, `DPAD_LEFT`, `DPAD_RIGHT`), `SPACE`, and `ENTER`.
+
+### 🛡️ 5. 3-Tier Shell Resilience & Balanced Security Gate
+- **3-Tier Shell Execution (`ShizukuBridge.kt`)**: Fallback chain from Shizuku (ADB OS Authority) ➔ SuperUser (`su`) ➔ Local Android Runtime (`sh`). Commands never fail just because Shizuku is inactive.
+- **Zero-Friction Security**: Routine development commands (`python`, `node`, `cat`, `mkdir`, `ls`, `curl`, `pm`, etc.) execute instantly without false alarm prompts. Only strictly catastrophic commands (`rm -rf /`, `mkfs`) trigger verbal safety confirmation.
+
+### 🛠️ 6. Expanded 43-Tool Suite
+1. **File & Hosting**: `write_file`, `read_file`, `list_directory`, `manage_web_server`
+2. **App & Navigation**: `open_app`, `open_url`, `close_assistant`, `task_done`
+3. **Visual Perception**: `analyze_current_screen`, `inspect_real_world`, `read_screen`, `take_screenshot`
+4. **Gestures & Input**: `click_element`, `type_text`, `scroll`, `tap_coordinates`, `swipe`, `drag_gesture`, `long_press`, `press_key`, `global_action`, `clipboard_action`
+5. **Hardware Controls**: `toggle_flashlight`, `toggle_hotspot`, `set_volume`, `toggle_dnd`, `toggle_auto_rotate`, `media_control`, `device_power_control`, `lock_phone`, `set_brightness`
+6. **Radio & Connectivity**: `toggle_wifi`, `toggle_bluetooth`, `toggle_mobile_data`
+7. **Diagnostics & Terminal**: `execute_shell_command`, `get_system_diagnostics`, `clear_app_data`
+8. **Telecom & Notifications**: `get_recent_notifications`, `reply_notification`, `read_latest_otp`, `make_phone_call`, `search_contacts`, `send_sms`
+
+---
+
+## 📦 Verified Release APKs (Signed via GitHub Actions CI)
 - `app-universal-release.apk`: Universal build for all Android devices (Android 7.0 to Android 15/16).
 - `app-arm64-v8a-release.apk`: Optimized for modern 64-bit ARM devices.
 - `app-armeabi-v7a-release.apk`: For 32-bit ARM devices.
