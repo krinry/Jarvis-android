@@ -174,6 +174,45 @@ object FileManagerBridge {
     }
 
     /**
+     * Packages a directory into a standard .zip archive for cloud deployment (Netlify, etc.)
+     */
+    suspend fun zipDirectory(
+        dirPath: String,
+        outputZipName: String? = null
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val sourceDir = resolveFile(dirPath)
+        if (!sourceDir.exists() || !sourceDir.isDirectory) {
+            return@withContext Pair(false, "❌ Directory does not exist: ${sourceDir.absolutePath}")
+        }
+
+        val zipFile = if (outputZipName.isNullOrBlank()) {
+            File(sourceDir.parentFile ?: getWorkspaceDir(), "${sourceDir.name}.zip")
+        } else {
+            resolveFile(outputZipName)
+        }
+
+        try {
+            java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
+                sourceDir.walkTopDown().filter { it.isFile && it.absolutePath != zipFile.absolutePath }.forEach { file ->
+                    val relativePath = file.relativeTo(sourceDir).path.replace('\\', '/')
+                    val entry = java.util.zip.ZipEntry(relativePath)
+                    zos.putNextEntry(entry)
+                    file.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                }
+            }
+            Log.i(TAG, "Zipped ${sourceDir.absolutePath} to ${zipFile.absolutePath} (${zipFile.length()} bytes)")
+            return@withContext Pair(
+                true,
+                "✅ Project successfully zipped into: ${zipFile.absolutePath} (${zipFile.length()} bytes)"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to zip directory", e)
+            return@withContext Pair(false, "❌ Failed to create zip: ${e.message}")
+        }
+    }
+
+    /**
      * Deletes [path].
      */
     suspend fun deleteFile(path: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
